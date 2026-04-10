@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Base Uniswap v3 Positions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">range_</div>
+        <div class="nav">
+          <span class="active">dashboard</span>
+          <span>base chain</span>
+          <span>uniswap v3</span>
+          <span>positions</span>
+        </div>
+      </div>
+      <button class="button" id="refreshTopButton" type="button">Refresh positions</button>
+    </header>
+
+    <section class="summary">
+      <div class="summary-head">
+        <div class="summary-account">
+          <div class="account-badge" id="accountBadge">LP</div>
+          <div>
+            <h1 id="walletHeadline">Waiting for wallet</h1>
+            <p id="walletSubline">Load `.env` or enter a wallet + API key below.</p>
+            <div class="account-chip-row">
+              <span class="chip account">Account</span>
+              <span class="chip base">Base</span>
+              <span class="chip protocol">Uniswap v3</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="summary-metric">
+          <p>assets value</p>
+          <div class="summary-value" id="totalValue">$0.00</div>
+          <p class="note">live pool value</p>
+        </div>
+
+        <div class="summary-metric">
+          <p>claimable now</p>
+          <div class="summary-value" id="totalClaimable">$0.00</div>
+          <p class="note">fees plus any owed tokens</p>
+        </div>
+
+        <div class="summary-metric">
+          <p>open LPs</p>
+          <div class="summary-value" id="openCount">0</div>
+          <p class="note">currently owned NFTs</p>
+        </div>
+
+        <div class="summary-metric">
+          <p>range status</p>
+          <div class="summary-value" id="rangeSummary">0 / 0</div>
+          <p class="note">in range vs total</p>
+        </div>
+      </div>
+
+      <div class="summary-foot">
+        <form id="lookupForm" novalidate>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">wallet address</span>
+              <input id="walletInput" name="wallet" placeholder="0x..." autocomplete="off">
+            </label>
+
+            <label class="field">
+              <span class="field-label">alchemy api key</span>
+              <input id="alchemyInput" name="alchemyKey" type="password" placeholder="Paste key or load from .env" autocomplete="off">
+            </label>
+
+            <button class="button" id="refreshButton" type="submit">Load positions</button>
+          </div>
+        </form>
+
+        <div class="status-card">
+          <p class="field-label">status</p>
+          <div class="status-note" id="statusText">Ready.</div>
+          <p class="note" id="lastUpdatedText">No fetch has run yet.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="banner" id="envBanner">
+      <div>
+        <strong>Dashboard note</strong>
+        <p class="note" id="bannerText">The page will try to read `./.env` for `alchemy_key` and `default_wallet` on load.</p>
+      </div>
+      <span class="chip subtle" id="bannerChip">Env pending</span>
+    </section>
+
+    <section class="section-card">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" id="openSectionTitle">Open LP positions (0)</h2>
+          <p class="note">Built from live Base mainnet contract reads via Alchemy.</p>
+        </div>
+        <div class="chip-row">
+          <span class="chip subtle" id="exchangeCountChip">0 pools</span>
+          <span class="chip neutral">Base only</span>
+        </div>
+      </div>
+
+      <div class="position-list" id="openPositions"></div>
+      <div class="empty-state hidden" id="openEmpty">
+        <h3>No open positions found</h3>
+        <p class="help-text">This wallet does not currently own any Base Uniswap v3 position NFTs with non-zero liquidity.</p>
+      </div>
+    </section>
+
+    <section class="section-card">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" id="exitedSectionTitle">Exited LP positions (0)</h2>
+          <p class="note">Owned position NFTs with zero liquidity are shown here.</p>
+        </div>
+      </div>
+
+      <div class="position-list" id="exitedPositions"></div>
+      <div class="empty-state hidden" id="exitedEmpty">
+        <h3>No exited positions found</h3>
+        <p class="help-text">If the wallet still owns any zero-liquidity Uniswap v3 NFTs, they will appear here.</p>
+      </div>
+    </section>
+
+    <section class="section-card">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" id="vfatSectionTitle">VFat CL positions (Base)</h2>
+          <p class="note">Tracks ERC-721 CL position NFT transfers for Aerodrome SlipStream, PancakeSwap V3, and Uniswap V3 on Base.</p>
+        </div>
+      </div>
+
+      <div class="chip-row" id="vfatStatsRow">
+        <span class="chip subtle" id="vfatDeployedCountChip">0 direct deployments</span>
+        <span class="chip subtle" id="vfatFactoryCountChip">0 factory deployments</span>
+        <span class="chip subtle" id="vfatContractsCountChip">0 VFat contracts</span>
+        <span class="chip subtle" id="vfatCurrentCountChip">0 active positions</span>
+        <span class="chip subtle" id="vfatOwnedByVfatCountChip">0 owned by VFat</span>
+        <span class="chip subtle" id="vfatExternalizedCountChip">0 externalized</span>
+        <span class="chip subtle" id="vfatUncertainCountChip">0 uncertain</span>
+      </div>
+
+      <p class="note vfat-error hidden" id="vfatErrorText"></p>
+      <div class="cl-panel-grid">
+        <article class="cl-panel">
+          <h3>Currently Active CL Positions</h3>
+          <p class="note">Live owner + non-zero liquidity only (burned and closed positions excluded). 24h APR is annualized from fees + emissions over current USD value.</p>
+          <div class="cl-table-wrap">
+            <table class="cl-table">
+              <thead>
+                <tr>
+                  <th>Protocol</th>
+                  <th>Pool</th>
+                  <th>Fee</th>
+                  <th>Range (lower -> upper)</th>
+                  <th>Current price</th>
+                  <th>Fees (24h, USD)</th>
+                  <th>Emissions (24h, USD)</th>
+                  <th>Total Deposited (USD)</th>
+                  <th>APR (24h annualized)</th>
+                </tr>
+              </thead>
+              <tbody id="vfatCurrentTableBody"></tbody>
+            </table>
+          </div>
+          <p class="note hidden" id="vfatCurrentEmpty">No active CL positions found.</p>
+        </article>
+      </div>
+
+      <div class="empty-state hidden" id="vfatEmptyNoDeployments">
+        <h3>No deploy-based contracts found</h3>
+        <p class="help-text">No direct deployments (`to = null`) and no matching Sickle factory deployments were found for this wallet on Base.</p>
+      </div>
+
+      <div class="empty-state hidden" id="vfatEmptyNoContracts">
+        <h3>No VFat contracts identified</h3>
+        <p class="help-text">Directly deployed contracts exist, but none matched the strict configured VFat signature rules.</p>
+      </div>
+    </section>
+  </div>
+
+  <script src="./app.js?v=20260410g"></script>
+</body>
+</html>
