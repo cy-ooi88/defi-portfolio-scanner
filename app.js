@@ -22,6 +22,10 @@ const EARNED_SELECTOR = "0x3e491d47"; // earned(address,uint256)
 const REWARD_TOKEN_SELECTOR = "0xf7c618c1"; // rewardToken()
 const GET_REWARD_BY_TOKEN_SELECTOR = "0x1c4b774b"; // getReward(uint256)
 const GET_REWARD_BY_ACCOUNT_SELECTOR = "0xc00007b0"; // getReward(address)
+const ACCOUNT_WIDE_CLAIM_SELECTORS = new Set([
+  GET_REWARD_BY_ACCOUNT_SELECTOR,
+  "0xcef6d209" // observed Base blanket-claim route used by Sickle/VFat claim execution
+]);
 const HARVEST_BY_TOKEN_SELECTOR = "0x18fccc76"; // harvest(uint256,address)
 const PENDING_CAKE_SELECTOR = "0xce5f39c6"; // pendingCake(uint256)
 const CAKE_SELECTOR = "0x4ca6ef28"; // CAKE()
@@ -1242,6 +1246,25 @@ async function fetchErc20TransfersInWindow(apiKey, {
   return transfers;
 }
 
+function getClaimScopeKey(row) {
+  if (!row?.protocol || !row?.currentOwner || !row?.vfatContract) {
+    return null;
+  }
+  return `${row.protocol}:${row.currentOwner.toLowerCase()}:${row.vfatContract.toLowerCase()}`;
+}
+
+function buildClaimScopeCounts(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    const key = getClaimScopeKey(row);
+    if (!key) {
+      continue;
+    }
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
 async function classifyOwnerAdapter(row, apiKey) {
   const cacheKey = `${row.protocol}:${row.currentOwner.toLowerCase()}`;
   if (state.ownerAdapterByAddress.has(cacheKey)) {
@@ -1325,7 +1348,7 @@ async function resolvePancakeRewardToken(masterchefAddress, apiKey) {
   return ethers.getAddress(PANCAKE_CAKE_TOKEN);
 }
 
-async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider) {
+async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, claimScopeCount = 0) {
   if (row.adapterType !== "aerodrome_clgauge") {
     return {
       emissions24hUsd: null,
@@ -1408,6 +1431,12 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider) {
       } else {
         ambiguousClaims += claimAmount;
       }
+    } else if (ACCOUNT_WIDE_CLAIM_SELECTORS.has(selector)) {
+      if (claimScopeCount === 1) {
+        realizedAttributed += claimAmount;
+      } else {
+        ambiguousClaims += claimAmount;
+      }
     } else {
       ambiguousClaims += claimAmount;
     }
@@ -1454,7 +1483,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider) {
   };
 }
 
-async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider) {
+async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, claimScopeCount = 0) {
   if (row.adapterType !== "pancake_masterchef") {
     return {
       emissions24hUsd: null,
@@ -1530,6 +1559,12 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider) {
       } else {
         ambiguousClaims += rawAmount;
       }
+    } else if (ACCOUNT_WIDE_CLAIM_SELECTORS.has(selector)) {
+      if (claimScopeCount === 1) {
+        realizedAttributed += rawAmount;
+      } else {
+        ambiguousClaims += rawAmount;
+      }
     } else {
       ambiguousClaims += rawAmount;
     }
@@ -1565,7 +1600,7 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider) {
   };
 }
 
-async function fetchEmissions24h(row, blockWindow, apiKey, provider) {
+async function fetchEmissions24h(row, blockWindow, apiKey, provider, claimScopeCount = 0) {
   const adapter = CL_PROTOCOL_ADAPTERS[row.protocol] || {
     feesMode: "realized_plus_pending_delta",
     emissionsMode: "none"
@@ -1580,11 +1615,11 @@ async function fetchEmissions24h(row, blockWindow, apiKey, provider) {
   }
 
   if (row.protocol === "Aerodrome SlipStream") {
-    return fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider);
+    return fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, claimScopeCount);
   }
 
   if (row.protocol === "PancakeSwap V3") {
-    return fetchPancakeEmissions24h(row, blockWindow, apiKey, provider);
+    return fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, claimScopeCount);
   }
 
   return {
@@ -1595,7 +1630,7 @@ async function fetchEmissions24h(row, blockWindow, apiKey, provider) {
   };
 }
 
-async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider) {
+async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider, claimScopeCount = 0) {
   const adapter = CL_PROTOCOL_ADAPTERS[row.protocol] || {
     feesMode: "realized_plus_pending_delta",
     emissionsMode: "none"
@@ -1648,7 +1683,7 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
     metricsReason: "partial_call_failed"
   };
   try {
-    emissions = await fetchEmissions24h(row, blockWindow, apiKey, provider);
+    emissions = await fetchEmissions24h(row, blockWindow, apiKey, provider, claimScopeCount);
   } catch {
     // Keep fees + APR path alive even if emission endpoints fail.
   }
@@ -1698,12 +1733,15 @@ async function enrichCurrentRowsWith24hMetrics(rows, apiKey, provider, onStatus 
       metricsReason: "partial_call_failed"
     }));
   }
+  const claimScopeCounts = buildClaimScopeCounts(rows);
   const enriched = [];
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i];
     onStatus(`Calculating 24h fees/emissions APR (${i + 1}/${rows.length}) for ${row.protocol} #${row.tokenIdDecimal}...`);
+    const claimScopeKey = getClaimScopeKey(row);
+    const claimScopeCount = claimScopeKey ? (claimScopeCounts.get(claimScopeKey) || 0) : 0;
     try {
-      const withMetrics = await enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider);
+      const withMetrics = await enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider, claimScopeCount);
       enriched.push(withMetrics);
     } catch {
       enriched.push({
