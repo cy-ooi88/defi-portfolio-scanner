@@ -121,6 +121,7 @@ const els = {
   totalClaimable: document.getElementById("totalClaimable"),
   openCount: document.getElementById("openCount"),
   rangeSummary: document.getElementById("rangeSummary"),
+  rangeSummaryNote: document.getElementById("rangeSummaryNote"),
   exchangeCountChip: document.getElementById("exchangeCountChip"),
   openSectionTitle: document.getElementById("openSectionTitle"),
   exitedSectionTitle: document.getElementById("exitedSectionTitle"),
@@ -1353,6 +1354,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_unclassified"
     };
@@ -1376,6 +1378,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
@@ -1388,6 +1391,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
@@ -1406,6 +1410,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
@@ -1445,6 +1450,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
@@ -1459,11 +1465,13 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
   }
 
+  const pendingEmissionsNowUsd = normalizeAmount(pendingNow, tokenMeta.decimals) * rewardPrice;
   const emissionsAmount = normalizeAmount(emissionsRaw, tokenMeta.decimals);
   const emissions24hUsd = emissionsAmount * rewardPrice;
   const metricsReason = ambiguousClaims > 0n ? "partial_ambiguous_claim" : "full";
@@ -1478,6 +1486,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
       usd: emissions24hUsd,
       pendingNow: normalizeAmount(pendingNow, tokenMeta.decimals)
     }],
+    pendingEmissionsNowUsd,
     metricsQuality,
     metricsReason
   };
@@ -1488,6 +1497,7 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_unclassified"
     };
@@ -1509,6 +1519,7 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
@@ -1519,6 +1530,7 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
@@ -1537,6 +1549,7 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
@@ -1579,11 +1592,13 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
     return {
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
   }
 
+  const pendingEmissionsNowUsd = normalizeAmount(pendingNow, tokenMeta.decimals) * rewardPrice;
   const emissionsAmount = normalizeAmount(emissionsRaw, tokenMeta.decimals);
   const emissions24hUsd = emissionsAmount * rewardPrice;
   return {
@@ -1595,6 +1610,7 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
       usd: emissions24hUsd,
       pendingNow: normalizeAmount(pendingNow, tokenMeta.decimals)
     }],
+    pendingEmissionsNowUsd,
     metricsQuality: ambiguousClaims > 0n ? "partial" : "full",
     metricsReason: ambiguousClaims > 0n ? "partial_ambiguous_claim" : "full"
   };
@@ -1609,6 +1625,7 @@ async function fetchEmissions24h(row, blockWindow, apiKey, provider, claimScopeC
     return {
       emissions24hUsd: 0,
       emissions24hBreakdown: [],
+      pendingEmissionsNowUsd: 0,
       metricsQuality: "full",
       metricsReason: "full"
     };
@@ -1625,6 +1642,7 @@ async function fetchEmissions24h(row, blockWindow, apiKey, provider, claimScopeC
   return {
     emissions24hUsd: null,
     emissions24hBreakdown: [],
+    pendingEmissionsNowUsd: null,
     metricsQuality: "partial",
     metricsReason: "partial_unclassified"
   };
@@ -1642,6 +1660,10 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
     fees24hUsd: null,
     emissions24hUsd: null,
     emissions24hBreakdown: [],
+    vfatFeesClaimableNowUsd: null,
+    vfatEmissionsClaimableNowUsd: null,
+    vfatClaimableNowUsd: null,
+    vfatInRange: null,
     apr24hPct: null,
     metricsQuality: "partial",
     metricsReason: "partial_call_failed"
@@ -1673,12 +1695,18 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
 
   const fees24hToken0 = normalizeAmount(fees24hRaw0, token0Meta.decimals);
   const fees24hToken1 = normalizeAmount(fees24hRaw1, token1Meta.decimals);
+  const claimableNowToken0 = normalizeAmount(pendingNow0, token0Meta.decimals);
+  const claimableNowToken1 = normalizeAmount(pendingNow1, token1Meta.decimals);
   const price0 = valuation.prices[token0Meta.address] ?? 0;
   const price1 = valuation.prices[token1Meta.address] ?? 0;
   const fees24hUsd = (Number.isFinite(price0) ? fees24hToken0 * price0 : 0) + (Number.isFinite(price1) ? fees24hToken1 * price1 : 0);
+  const vfatFeesClaimableNowUsd = adapter.feesMode === "none"
+    ? 0
+    : (Number.isFinite(price0) ? claimableNowToken0 * price0 : 0) + (Number.isFinite(price1) ? claimableNowToken1 * price1 : 0);
   let emissions = {
     emissions24hUsd: null,
     emissions24hBreakdown: [],
+    pendingEmissionsNowUsd: null,
     metricsQuality: "partial",
     metricsReason: "partial_call_failed"
   };
@@ -1688,6 +1716,14 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
     // Keep fees + APR path alive even if emission endpoints fail.
   }
   const currentPoolUsd = valuation.currentPoolUsd;
+  const vfatEmissionsClaimableNowUsd = Number.isFinite(emissions.pendingEmissionsNowUsd) ? emissions.pendingEmissionsNowUsd : null;
+  const claimableNowContributors = [vfatFeesClaimableNowUsd, vfatEmissionsClaimableNowUsd].filter((value) => Number.isFinite(value));
+  const vfatClaimableNowUsd = claimableNowContributors.length
+    ? claimableNowContributors.reduce((sum, value) => sum + value, 0)
+    : null;
+  const vfatInRange = Number.isFinite(row.poolCurrentPrice) && Number.isFinite(row.poolRangeLowerPrice) && Number.isFinite(row.poolRangeUpperPrice)
+    ? row.poolCurrentPrice >= row.poolRangeLowerPrice && row.poolCurrentPrice < row.poolRangeUpperPrice
+    : null;
   const feeContribution = adapter.feesMode === "none" ? 0 : (Number.isFinite(fees24hUsd) ? fees24hUsd : 0);
   const emissionContribution = Number.isFinite(emissions.emissions24hUsd) ? emissions.emissions24hUsd : 0;
   const numerator = feeContribution + emissionContribution;
@@ -1704,6 +1740,10 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
     fees24hUsd,
     emissions24hUsd: emissions.emissions24hUsd,
     emissions24hBreakdown: emissions.emissions24hBreakdown,
+    vfatFeesClaimableNowUsd,
+    vfatEmissionsClaimableNowUsd,
+    vfatClaimableNowUsd,
+    vfatInRange,
     apr24hPct,
     metricsQuality,
     metricsReason: emissions.metricsReason
@@ -1728,6 +1768,10 @@ async function enrichCurrentRowsWith24hMetrics(rows, apiKey, provider, onStatus 
       fees24hUsd: null,
       emissions24hUsd: null,
       emissions24hBreakdown: [],
+      vfatFeesClaimableNowUsd: null,
+      vfatEmissionsClaimableNowUsd: null,
+      vfatClaimableNowUsd: null,
+      vfatInRange: null,
       apr24hPct: null,
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
@@ -1752,6 +1796,10 @@ async function enrichCurrentRowsWith24hMetrics(rows, apiKey, provider, onStatus 
         fees24hUsd: null,
         emissions24hUsd: null,
         emissions24hBreakdown: [],
+        vfatFeesClaimableNowUsd: null,
+        vfatEmissionsClaimableNowUsd: null,
+        vfatClaimableNowUsd: null,
+        vfatInRange: null,
         apr24hPct: null,
         metricsQuality: "partial",
         metricsReason: "partial_call_failed"
@@ -2212,6 +2260,79 @@ function enrichValues(position, prices) {
   };
 }
 
+function normalizePositionIdentityKey(tokenContract, tokenIdHex) {
+  const normalizedTokenId = normalizeTokenIdHex(String(tokenIdHex)).toLowerCase();
+  try {
+    return `${ethers.getAddress(tokenContract).toLowerCase()}:${normalizedTokenId}`;
+  } catch {
+    return `${String(tokenContract).toLowerCase()}:${normalizedTokenId}`;
+  }
+}
+
+function buildUnifiedSummaryTotals(openPositions, vfatClCurrentRows) {
+  const summaryByKey = new Map();
+
+  for (const row of (vfatClCurrentRows || [])) {
+    const key = normalizePositionIdentityKey(row.tokenContract, row.tokenIdHex);
+    const poolIdentity = row.poolPair
+      ? `${row.protocol || "unknown"}:${row.poolPair}:${Number.isFinite(row.poolFee) ? row.poolFee : "na"}`
+      : null;
+    summaryByKey.set(key, {
+      pooledUsd: Number.isFinite(row.currentPoolUsd) ? row.currentPoolUsd : null,
+      claimableUsd: Number.isFinite(row.vfatClaimableNowUsd) ? row.vfatClaimableNowUsd : null,
+      inRange: typeof row.vfatInRange === "boolean" ? row.vfatInRange : null,
+      poolIdentity
+    });
+  }
+
+  for (const position of (openPositions || [])) {
+    const key = normalizePositionIdentityKey(NFPM_ADDRESS, `0x${BigInt(position.tokenId).toString(16)}`);
+    summaryByKey.set(key, {
+      pooledUsd: Number.isFinite(position.pooledUsd) ? position.pooledUsd : null,
+      claimableUsd: Number.isFinite(position.claimableUsd) ? position.claimableUsd : null,
+      inRange: typeof position.inRange === "boolean" ? position.inRange : null,
+      poolIdentity: position.poolAddress ? position.poolAddress.toLowerCase() : null
+    });
+  }
+
+  let pooledUsd = 0;
+  let claimableUsd = 0;
+  let inRangeCount = 0;
+  let rangeConsideredCount = 0;
+  const uniquePools = new Set();
+
+  for (const summary of summaryByKey.values()) {
+    if (Number.isFinite(summary.pooledUsd)) {
+      pooledUsd += summary.pooledUsd;
+    }
+    if (Number.isFinite(summary.claimableUsd)) {
+      claimableUsd += summary.claimableUsd;
+    }
+    if (typeof summary.inRange === "boolean") {
+      rangeConsideredCount += 1;
+      if (summary.inRange) {
+        inRangeCount += 1;
+      }
+    }
+    if (summary.poolIdentity) {
+      uniquePools.add(summary.poolIdentity);
+    }
+  }
+
+  const openCount = summaryByKey.size;
+  const rangeExcludedCount = openCount - rangeConsideredCount;
+
+  return {
+    pooledUsd,
+    claimableUsd,
+    openCount,
+    inRangeCount,
+    rangeConsideredCount,
+    rangeExcludedCount,
+    poolCount: uniquePools.size
+  };
+}
+
 async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
   const provider = getProvider(apiKey);
   const owner = ethers.getAddress(wallet);
@@ -2228,7 +2349,6 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
   const positions = rawPositions.map((item) => enrichValues(item, prices));
   const openPositions = positions.filter((item) => item.liquidity > 0n);
   const exitedPositions = positions.filter((item) => item.liquidity === 0n);
-  const inRangeCount = openPositions.filter((item) => item.inRange).length;
   const vfatData = {
     directDeployedContracts: [],
     factoryDeployedContracts: [],
@@ -2257,6 +2377,8 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
     vfatData.vfatClError = error?.message || "Failed to fetch VFat CL position transfers.";
   }
 
+  const unifiedTotals = buildUnifiedSummaryTotals(openPositions, vfatData.vfatClCurrentRows);
+
   return {
     owner,
     openPositions,
@@ -2272,30 +2394,39 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
     vfatClUncertainCount: vfatData.vfatClUncertainCount,
     vfatClError: vfatData.vfatClError,
     totals: {
-      pooledUsd: openPositions.reduce((sum, item) => sum + item.pooledUsd, 0),
-      claimableUsd: openPositions.reduce((sum, item) => sum + item.claimableUsd, 0),
-      inRangeCount
+      pooledUsd: unifiedTotals.pooledUsd,
+      claimableUsd: unifiedTotals.claimableUsd,
+      openCount: unifiedTotals.openCount,
+      inRangeCount: unifiedTotals.inRangeCount,
+      rangeConsideredCount: unifiedTotals.rangeConsideredCount,
+      rangeExcludedCount: unifiedTotals.rangeExcludedCount
     }
   };
 }
 
 function renderSummary(portfolio) {
   const { owner, openPositions, totals } = portfolio;
-  const outOfRange = openPositions.length - totals.inRangeCount;
+  const outOfRange = Math.max(0, totals.rangeConsideredCount - totals.inRangeCount);
   els.accountBadge.textContent = owner.slice(2, 4).toUpperCase();
   els.walletHeadline.textContent = shortenAddress(owner);
-  els.walletSubline.textContent = `${openPositions.length} active position${openPositions.length === 1 ? "" : "s"} on Base`;
+  els.walletSubline.textContent = `${totals.openCount} active position${totals.openCount === 1 ? "" : "s"} on Base`;
   els.totalValue.textContent = formatUsd(totals.pooledUsd);
   els.totalClaimable.textContent = formatUsd(totals.claimableUsd);
-  els.openCount.textContent = String(openPositions.length);
-  els.rangeSummary.textContent = `${totals.inRangeCount} / ${openPositions.length}`;
+  els.openCount.textContent = String(totals.openCount);
+  els.rangeSummary.textContent = `${totals.inRangeCount} / ${totals.rangeConsideredCount}`;
+  if (els.rangeSummaryNote) {
+    els.rangeSummaryNote.textContent = totals.rangeExcludedCount > 0
+      ? `${totals.rangeExcludedCount} pools excluded due to missing live range/price reads`
+      : "in range vs total";
+  }
   els.exchangeCountChip.textContent = `${new Set(openPositions.map((item) => item.poolAddress)).size} pool${openPositions.length === 1 ? "" : "s"}`;
   els.openSectionTitle.textContent = `Open LP positions (${portfolio.openPositions.length})`;
   els.exitedSectionTitle.textContent = `Exited LP positions (${portfolio.exitedPositions.length})`;
-  if (openPositions.length) {
-    setStatus(`${totals.inRangeCount} in range, ${outOfRange} out of range.`, "success");
+  if (totals.openCount) {
+    const exclusionNote = totals.rangeExcludedCount > 0 ? ` (${totals.rangeExcludedCount} excluded)` : "";
+    setStatus(`${totals.inRangeCount} in range, ${outOfRange} out of range${exclusionNote}.`, "success");
   } else {
-    setStatus("No active Base Uniswap v3 positions found.");
+    setStatus("No active Base LP positions found.");
   }
 }
 
@@ -2547,6 +2678,9 @@ function clearDashboard() {
   els.totalClaimable.textContent = "$0.00";
   els.openCount.textContent = "0";
   els.rangeSummary.textContent = "0 / 0";
+  if (els.rangeSummaryNote) {
+    els.rangeSummaryNote.textContent = "in range vs total";
+  }
   els.exchangeCountChip.textContent = "0 pools";
   els.openSectionTitle.textContent = "Open LP positions (0)";
   els.exitedSectionTitle.textContent = "Exited LP positions (0)";
