@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.2/css/all.min.css">
   <link rel="stylesheet" href="./styles.css">
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
 </head>
@@ -22,7 +23,14 @@
           <span>positions</span>
         </div>
       </div>
-      <button class="button" id="refreshTopButton" type="button">Refresh positions</button>
+      <div class="top-actions">
+        <button class="icon-button" id="settingsButton" type="button" aria-label="Open settings">
+          <i class="fa-solid fa-gear" aria-hidden="true"></i>
+        </button>
+        <button class="icon-button" id="refreshTopButton" type="button" aria-label="Refresh positions">
+          <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+        </button>
+      </div>
     </header>
 
     <section class="summary">
@@ -30,8 +38,8 @@
         <div class="summary-account">
           <div class="account-badge" id="accountBadge">LP</div>
           <div>
-            <h1 id="walletHeadline">Waiting for wallet</h1>
-            <p id="walletSubline">Load `.env` or enter a wallet + API key below.</p>
+            <h1 id="walletHeadline" data-loading-field>Waiting for wallet</h1>
+            <p id="walletSubline" data-loading-field>Open settings to enter wallet + API key.</p>
             <div class="account-chip-row">
               <span class="chip account">Account</span>
               <span class="chip base">Base</span>
@@ -42,70 +50,39 @@
 
         <div class="summary-metric">
           <p>assets value</p>
-          <div class="summary-value" id="totalValue">$0.00</div>
+          <div class="summary-value" id="totalValue" data-loading-field>$0.00</div>
           <p class="note">live pool value</p>
         </div>
 
         <div class="summary-metric">
           <p>claimable now</p>
-          <div class="summary-value" id="totalClaimable">$0.00</div>
+          <div class="summary-value" id="totalClaimable" data-loading-field>$0.00</div>
           <p class="note">fees plus any owed tokens</p>
         </div>
 
         <div class="summary-metric">
           <p>open LPs</p>
-          <div class="summary-value" id="openCount">0</div>
+          <div class="summary-value" id="openCount" data-loading-field>0</div>
           <p class="note">currently owned NFTs</p>
         </div>
 
         <div class="summary-metric">
           <p>range status</p>
-          <div class="summary-value" id="rangeSummary">0 / 0</div>
-          <p class="note" id="rangeSummaryNote">in range vs total</p>
+          <div class="summary-value" id="rangeSummary" data-loading-field>0 / 0</div>
+          <p class="note" id="rangeSummaryNote" data-loading-field>in range vs total</p>
         </div>
       </div>
 
-      <div class="summary-foot">
-        <form id="lookupForm" novalidate>
-          <div class="form-grid">
-            <label class="field">
-              <span class="field-label">wallet address</span>
-              <input id="walletInput" name="wallet" placeholder="0x..." autocomplete="off">
-            </label>
-
-            <label class="field">
-              <span class="field-label">alchemy api key</span>
-              <input id="alchemyInput" name="alchemyKey" type="password" placeholder="Paste key or load from .env" autocomplete="off">
-            </label>
-
-            <button class="button" id="refreshButton" type="submit">Load positions</button>
-          </div>
-        </form>
-
-        <div class="status-card">
-          <p class="field-label">status</p>
-          <div class="status-note" id="statusText">Ready.</div>
-          <p class="note" id="lastUpdatedText">No fetch has run yet.</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="banner" id="envBanner">
-      <div>
-        <strong>Dashboard note</strong>
-        <p class="note" id="bannerText">The page will try to read `./.env` for `alchemy_key` and `default_wallet` on load.</p>
-      </div>
-      <span class="chip subtle" id="bannerChip">Env pending</span>
     </section>
 
     <section class="section-card">
       <div class="section-head">
         <div>
-          <h2 class="section-title" id="openSectionTitle">Open LP positions (0)</h2>
+          <h2 class="section-title" id="openSectionTitle" data-loading-field>Open LP positions (0)</h2>
           <p class="note">Built from live Base mainnet contract reads via Alchemy.</p>
         </div>
         <div class="chip-row">
-          <span class="chip subtle" id="exchangeCountChip">0 pools</span>
+          <span class="chip subtle" id="exchangeCountChip" data-loading-field>0 pools</span>
           <span class="chip neutral">Base only</span>
         </div>
       </div>
@@ -120,7 +97,7 @@
     <section class="section-card">
       <div class="section-head">
         <div>
-          <h2 class="section-title" id="exitedSectionTitle">Exited LP positions (0)</h2>
+          <h2 class="section-title" id="exitedSectionTitle" data-loading-field>Exited LP positions (0)</h2>
           <p class="note">Owned position NFTs with zero liquidity are shown here.</p>
         </div>
       </div>
@@ -135,19 +112,19 @@
     <section class="section-card">
       <div class="section-head">
         <div>
-          <h2 class="section-title" id="vfatSectionTitle">VFat CL positions (Base)</h2>
+          <h2 class="section-title" id="vfatSectionTitle" data-loading-field>VFat CL positions (Base)</h2>
           <p class="note">Tracks ERC-721 CL position NFT transfers for Aerodrome SlipStream, PancakeSwap V3, and Uniswap V3 on Base.</p>
         </div>
       </div>
 
       <div class="chip-row" id="vfatStatsRow">
-        <span class="chip subtle" id="vfatDeployedCountChip">0 direct deployments</span>
-        <span class="chip subtle" id="vfatFactoryCountChip">0 factory deployments</span>
-        <span class="chip subtle" id="vfatContractsCountChip">0 VFat contracts</span>
-        <span class="chip subtle" id="vfatCurrentCountChip">0 active positions</span>
-        <span class="chip subtle" id="vfatOwnedByVfatCountChip">0 owned by VFat</span>
-        <span class="chip subtle" id="vfatExternalizedCountChip">0 externalized</span>
-        <span class="chip subtle" id="vfatUncertainCountChip">0 uncertain</span>
+        <span class="chip subtle" id="vfatDeployedCountChip" data-loading-field>0 direct deployments</span>
+        <span class="chip subtle" id="vfatFactoryCountChip" data-loading-field>0 factory deployments</span>
+        <span class="chip subtle" id="vfatContractsCountChip" data-loading-field>0 VFat contracts</span>
+        <span class="chip subtle" id="vfatCurrentCountChip" data-loading-field>0 active positions</span>
+        <span class="chip subtle" id="vfatOwnedByVfatCountChip" data-loading-field>0 owned by VFat</span>
+        <span class="chip subtle" id="vfatExternalizedCountChip" data-loading-field>0 externalized</span>
+        <span class="chip subtle" id="vfatUncertainCountChip" data-loading-field>0 uncertain</span>
       </div>
 
       <p class="note vfat-error hidden" id="vfatErrorText"></p>
@@ -186,6 +163,35 @@
         <h3>No VFat contracts identified</h3>
         <p class="help-text">Directly deployed contracts exist, but none matched the strict configured VFat signature rules.</p>
       </div>
+    </section>
+  </div>
+
+  <div class="settings-overlay hidden" id="settingsOverlay" aria-hidden="true">
+    <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="settings-head">
+        <h2 id="settingsTitle">Settings</h2>
+        <button class="icon-button" id="settingsCloseButton" type="button" aria-label="Close settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.7 5.3a1 1 0 0 0-1.4 1.4L10.6 12l-5.3 5.3a1 1 0 1 0 1.4 1.4l5.3-5.3 5.3 5.3a1 1 0 1 0 1.4-1.4L13.4 12l5.3-5.3a1 1 0 0 0-1.4-1.4L12 10.6 6.7 5.3Z" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="lookupForm" novalidate>
+        <div class="form-grid">
+          <label class="field">
+            <span class="field-label">wallet address</span>
+            <input id="walletInput" name="wallet" placeholder="0x..." autocomplete="off">
+          </label>
+
+          <label class="field">
+            <span class="field-label">alchemy api key</span>
+            <input id="alchemyInput" name="alchemyKey" type="password" placeholder="Paste your Alchemy key" autocomplete="off">
+          </label>
+        </div>
+        <button class="button settings-submit" id="refreshButton" type="submit">Load / Refresh Positions</button>
+        <p class="note settings-note">Your wallet and key are saved locally in this browser.</p>
+      </form>
     </section>
   </div>
 

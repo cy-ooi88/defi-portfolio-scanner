@@ -92,6 +92,11 @@ const ERC20_ABI = [
   "function decimals() view returns (uint8)"
 ];
 
+const STORAGE_KEYS = {
+  wallet: "defi_scanner_wallet",
+  alchemyKey: "defi_scanner_alchemy_key"
+};
+
 const state = {
   provider: null,
   providerKey: "",
@@ -108,6 +113,9 @@ const els = {
   form: document.getElementById("lookupForm"),
   refreshButton: document.getElementById("refreshButton"),
   refreshTopButton: document.getElementById("refreshTopButton"),
+  settingsButton: document.getElementById("settingsButton"),
+  settingsOverlay: document.getElementById("settingsOverlay"),
+  settingsCloseButton: document.getElementById("settingsCloseButton"),
   walletInput: document.getElementById("walletInput"),
   alchemyInput: document.getElementById("alchemyInput"),
   statusText: document.getElementById("statusText"),
@@ -141,23 +149,39 @@ const els = {
   vfatCurrentTableBody: document.getElementById("vfatCurrentTableBody"),
   vfatCurrentEmpty: document.getElementById("vfatCurrentEmpty"),
   vfatEmptyNoDeployments: document.getElementById("vfatEmptyNoDeployments"),
-  vfatEmptyNoContracts: document.getElementById("vfatEmptyNoContracts")
+  vfatEmptyNoContracts: document.getElementById("vfatEmptyNoContracts"),
+  loadingFields: Array.from(document.querySelectorAll("[data-loading-field]"))
 };
 
+function setLoadingState(isLoading) {
+  for (const field of els.loadingFields) {
+    field.classList.toggle("loading-field--busy", isLoading);
+  }
+}
+
 function setBusy(isBusy, text = "") {
-  els.refreshButton.disabled = isBusy;
+  if (els.refreshButton) {
+    els.refreshButton.disabled = isBusy;
+  }
   els.refreshTopButton.disabled = isBusy;
-  if (text) {
+  setLoadingState(isBusy);
+  if (text && els.statusText) {
     els.statusText.textContent = text;
   }
 }
 
 function setStatus(text, tone = "neutral") {
+  if (!els.statusText) {
+    return;
+  }
   els.statusText.textContent = text;
   els.statusText.style.color = tone === "error" ? "var(--red)" : tone === "success" ? "var(--green)" : "var(--text)";
 }
 
 function updateBanner(text, chipText, tone = "neutral") {
+  if (!els.bannerText || !els.bannerChip) {
+    return;
+  }
   els.bannerText.textContent = text;
   els.bannerChip.textContent = chipText;
   els.bannerChip.className = "chip";
@@ -170,47 +194,52 @@ function updateBanner(text, chipText, tone = "neutral") {
   }
 }
 
-function parseEnv(text) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .reduce((accumulator, line) => {
-      const separator = line.indexOf("=");
-      if (separator === -1) {
-        return accumulator;
-      }
-      const key = line.slice(0, separator).trim();
-      const value = line.slice(separator + 1).trim();
-      accumulator[key] = value;
-      return accumulator;
-    }, {});
+function loadPersistedCredentials() {
+  try {
+    const savedWallet = localStorage.getItem(STORAGE_KEYS.wallet) || "";
+    const savedApiKey = localStorage.getItem(STORAGE_KEYS.alchemyKey) || "";
+    els.walletInput.value = savedWallet;
+    els.alchemyInput.value = savedApiKey;
+  } catch {
+    // Ignore localStorage access errors.
+  }
 }
 
-async function loadEnv() {
+function persistCredentials(wallet, apiKey) {
   try {
-    const response = await fetch("./.env", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    if (wallet) {
+      localStorage.setItem(STORAGE_KEYS.wallet, wallet);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.wallet);
     }
-    const env = parseEnv(await response.text());
-    if (env.default_wallet && !els.walletInput.value) {
-      els.walletInput.value = env.default_wallet;
+    if (apiKey) {
+      localStorage.setItem(STORAGE_KEYS.alchemyKey, apiKey);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.alchemyKey);
     }
-    if (env.alchemy_key && !els.alchemyInput.value) {
-      els.alchemyInput.value = env.alchemy_key;
-    }
-    updateBanner("Loaded default wallet and Alchemy key from ./.env.", "Env loaded", "success");
-  } catch (error) {
-    const fileProtocol = window.location.protocol === "file:";
-    updateBanner(
-      fileProtocol
-        ? "Browser file mode usually blocks reading .env. Serve the folder over local HTTP, or paste the values manually below."
-        : `Could not read ./.env (${error.message}). You can still paste the wallet and key manually.`,
-      fileProtocol ? "Serve locally" : "Env missing",
-      "warning"
-    );
+  } catch {
+    // Ignore localStorage access errors.
   }
+}
+
+function syncCredentialBanner() {
+  const hasWallet = Boolean(els.walletInput.value.trim());
+  const hasApiKey = Boolean(els.alchemyInput.value.trim());
+  if (hasWallet && hasApiKey) {
+    updateBanner("Wallet address and Alchemy key are loaded from browser local storage.", "Credentials ready", "success");
+    return;
+  }
+  updateBanner("Bring your own wallet + Alchemy key. Values are only stored in this browser local storage.", "Credentials needed", "warning");
+}
+
+function openSettings() {
+  els.settingsOverlay.classList.remove("hidden");
+  els.settingsOverlay.setAttribute("aria-hidden", "false");
+}
+
+function closeSettings() {
+  els.settingsOverlay.classList.add("hidden");
+  els.settingsOverlay.setAttribute("aria-hidden", "true");
 }
 
 function getProvider(apiKey) {
@@ -2674,6 +2703,9 @@ function renderVFatSection(portfolio) {
 }
 
 function clearDashboard() {
+  els.walletHeadline.textContent = "Waiting for wallet";
+  els.walletSubline.textContent = "Open settings to enter wallet + API key.";
+  els.accountBadge.textContent = "LP";
   els.totalValue.textContent = "$0.00";
   els.totalClaimable.textContent = "$0.00";
   els.openCount.textContent = "0";
@@ -2703,16 +2735,30 @@ function clearDashboard() {
   els.vfatEmptyNoContracts.classList.add("hidden");
 }
 
-async function runLookup() {
+async function runLookup({ openSettingsOnMissing = false } = {}) {
   const wallet = els.walletInput.value.trim();
   const apiKey = els.alchemyInput.value.trim();
+  persistCredentials(wallet, apiKey);
+  syncCredentialBanner();
 
   if (!wallet) {
-    setStatus("Enter a wallet address first.", "error");
+    setStatus("Enter a wallet address in Settings.", "error");
+    if (els.lastUpdatedText) {
+      els.lastUpdatedText.textContent = "Waiting for credentials.";
+    }
+    if (openSettingsOnMissing) {
+      openSettings();
+    }
     return;
   }
   if (!apiKey) {
-    setStatus("Enter an Alchemy API key first.", "error");
+    setStatus("Enter an Alchemy API key in Settings.", "error");
+    if (els.lastUpdatedText) {
+      els.lastUpdatedText.textContent = "Waiting for credentials.";
+    }
+    if (openSettingsOnMissing) {
+      openSettings();
+    }
     return;
   }
 
@@ -2722,11 +2768,16 @@ async function runLookup() {
     renderSummary(portfolio);
     renderPositions(portfolio);
     renderVFatSection(portfolio);
-    els.lastUpdatedText.textContent = `Last updated ${formatTimeStamp(new Date())}`;
+    if (els.lastUpdatedText) {
+      els.lastUpdatedText.textContent = `Last updated ${formatTimeStamp(new Date())}`;
+    }
+    closeSettings();
   } catch (error) {
     clearDashboard();
     setStatus(error.message || "Something went wrong while loading positions.", "error");
-    els.lastUpdatedText.textContent = "Fetch failed.";
+    if (els.lastUpdatedText) {
+      els.lastUpdatedText.textContent = "Fetch failed.";
+    }
   } finally {
     setBusy(false);
   }
@@ -2734,17 +2785,46 @@ async function runLookup() {
 
 async function boot() {
   clearDashboard();
-  await loadEnv();
-  if (els.walletInput.value && els.alchemyInput.value) {
-    await runLookup();
-  } else {
-    setStatus("Load `.env` or paste credentials to begin.");
-  }
+  loadPersistedCredentials();
+  syncCredentialBanner();
+  setStatus("Loading positions...");
+  await runLookup({ openSettingsOnMissing: true });
 }
 
 els.form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  closeSettings();
   await runLookup();
+});
+
+els.settingsButton.addEventListener("click", () => {
+  openSettings();
+});
+
+els.settingsCloseButton.addEventListener("click", () => {
+  closeSettings();
+});
+
+els.settingsOverlay.addEventListener("click", (event) => {
+  if (event.target === els.settingsOverlay) {
+    closeSettings();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.settingsOverlay.classList.contains("hidden")) {
+    closeSettings();
+  }
+});
+
+els.walletInput.addEventListener("change", () => {
+  persistCredentials(els.walletInput.value.trim(), els.alchemyInput.value.trim());
+  syncCredentialBanner();
+});
+
+els.alchemyInput.addEventListener("change", () => {
+  persistCredentials(els.walletInput.value.trim(), els.alchemyInput.value.trim());
+  syncCredentialBanner();
 });
 
 els.refreshTopButton.addEventListener("click", async () => {
