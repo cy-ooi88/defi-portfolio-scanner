@@ -24,7 +24,8 @@ const GET_REWARD_BY_TOKEN_SELECTOR = "0x1c4b774b"; // getReward(uint256)
 const GET_REWARD_BY_ACCOUNT_SELECTOR = "0xc00007b0"; // getReward(address)
 const ACCOUNT_WIDE_CLAIM_SELECTORS = new Set([
   GET_REWARD_BY_ACCOUNT_SELECTOR,
-  "0xcef6d209" // observed Base blanket-claim route used by Sickle/VFat claim execution
+  "0xcef6d209", // observed Base blanket-claim route used by Sickle/VFat claim execution
+  "0x16fbdebe" // observed claim+conversion route used by Sickle/VFat execution
 ]);
 const HARVEST_BY_TOKEN_SELECTOR = "0x18fccc76"; // harvest(uint256,address)
 const PENDING_CAKE_SELECTOR = "0xce5f39c6"; // pendingCake(uint256)
@@ -1458,7 +1459,11 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
 
     const tx = await fetchTransactionByHashCached(apiKey, transfer.hash);
     if (!tx?.input) {
-      ambiguousClaims += claimAmount;
+      if (claimScopeCount === 1) {
+        realizedAttributed += claimAmount;
+      } else {
+        ambiguousClaims += claimAmount;
+      }
       continue;
     }
 
@@ -1476,6 +1481,9 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
       } else {
         ambiguousClaims += claimAmount;
       }
+    } else if (claimScopeCount === 1) {
+      // Treat unknown wrapper selector as account-wide claim only when scope is unambiguous.
+      realizedAttributed += claimAmount;
     } else {
       ambiguousClaims += claimAmount;
     }
@@ -1612,6 +1620,9 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
       } else {
         ambiguousClaims += rawAmount;
       }
+    } else if (claimScopeCount === 1) {
+      // Treat unknown wrapper selector as account-wide claim only when scope is unambiguous.
+      realizedAttributed += rawAmount;
     } else {
       ambiguousClaims += rawAmount;
     }
@@ -1715,8 +1726,10 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
   const pendingNow1 = snapshotNow.claimable?.amount1 || 0n;
   const pendingStart0 = snapshot24h?.claimable?.amount0 || 0n;
   const pendingStart1 = snapshot24h?.claimable?.amount1 || 0n;
-  const rawFees0 = safePositive(collect24h.amount0 + (pendingNow0 - pendingStart0));
-  const rawFees1 = safePositive(collect24h.amount1 + (pendingNow1 - pendingStart1));
+  const pendingDelta0 = safePositive(pendingNow0 - pendingStart0);
+  const pendingDelta1 = safePositive(pendingNow1 - pendingStart1);
+  const rawFees0 = collect24h.amount0 + pendingDelta0;
+  const rawFees1 = collect24h.amount1 + pendingDelta1;
   const fees24hRaw0 = adapter.feesMode === "none" ? 0n : rawFees0;
   const fees24hRaw1 = adapter.feesMode === "none" ? 0n : rawFees1;
 
