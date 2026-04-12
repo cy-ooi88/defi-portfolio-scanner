@@ -141,24 +141,13 @@ const els = {
   rangeSummaryNote: document.getElementById("rangeSummaryNote"),
   exchangeCountChip: document.getElementById("exchangeCountChip"),
   openSectionTitle: document.getElementById("openSectionTitle"),
-  exitedSectionTitle: document.getElementById("exitedSectionTitle"),
-  openPositions: document.getElementById("openPositions"),
-  exitedPositions: document.getElementById("exitedPositions"),
+  openTableBody: document.getElementById("openTableBody"),
   openEmpty: document.getElementById("openEmpty"),
-  exitedEmpty: document.getElementById("exitedEmpty"),
-  vfatSectionTitle: document.getElementById("vfatSectionTitle"),
-  vfatDeployedCountChip: document.getElementById("vfatDeployedCountChip"),
-  vfatFactoryCountChip: document.getElementById("vfatFactoryCountChip"),
+  openDedupeStatus: document.getElementById("openDedupeStatus"),
   vfatContractsCountChip: document.getElementById("vfatContractsCountChip"),
   vfatCurrentCountChip: document.getElementById("vfatCurrentCountChip"),
-  vfatOwnedByVfatCountChip: document.getElementById("vfatOwnedByVfatCountChip"),
-  vfatExternalizedCountChip: document.getElementById("vfatExternalizedCountChip"),
   vfatUncertainCountChip: document.getElementById("vfatUncertainCountChip"),
   vfatErrorText: document.getElementById("vfatErrorText"),
-  vfatCurrentTableBody: document.getElementById("vfatCurrentTableBody"),
-  vfatCurrentEmpty: document.getElementById("vfatCurrentEmpty"),
-  vfatEmptyNoDeployments: document.getElementById("vfatEmptyNoDeployments"),
-  vfatEmptyNoContracts: document.getElementById("vfatEmptyNoContracts"),
   loadingFields: Array.from(document.querySelectorAll("[data-loading-field]"))
 };
 
@@ -1897,7 +1886,7 @@ async function enrichCurrentRowsWith24hMetrics(rows, apiKey, provider, onStatus 
     return [];
   }
 
-  onStatus("Resolving 24h block window for VFat metrics...");
+  onStatus("Resolving 24h block window for CL position metrics...");
   let blockWindow;
   try {
     blockWindow = await resolve24hBlockWindow(apiKey);
@@ -2532,57 +2521,98 @@ function normalizePositionIdentityKey(tokenContract, tokenIdHex) {
   }
 }
 
-function buildUnifiedSummaryTotals(openPositions, vfatClCurrentRows) {
-  const summaryByKey = new Map();
+function normalizeStandardOpenPositionRow(position, owner) {
+  const protocol = CL_PROTOCOL_BY_MANAGER.get(NFPM_ADDRESS.toLowerCase()) || "Uniswap V3";
+  const tokenIdHex = normalizeTokenIdHex(`0x${BigInt(position.tokenId).toString(16)}`);
+  return {
+    source: "standard",
+    protocol,
+    protocolDisplay: protocol,
+    tokenContract: ethers.getAddress(NFPM_ADDRESS),
+    tokenIdHex,
+    tokenIdDecimal: position.tokenId.toString(),
+    tokenKey: `wallet:${NFPM_ADDRESS.toLowerCase()}:${tokenIdHex.toLowerCase()}`,
+    vfatContract: owner,
+    currentOwner: owner,
+    ownerScope: "external",
+    ownerCheck: "confirmed",
+    ownerResolved: owner.toLowerCase(),
+    liveLiquidity: position.liquidity.toString(),
+    adapterType: "direct_owner",
+    poolPair: `${position.token0.symbol}/${position.token1.symbol}`,
+    poolFee: Number(position.position.fee),
+    poolToken0: position.token0.address,
+    poolToken1: position.token1.address,
+    poolTickLower: Number(position.position.tickLower),
+    poolTickUpper: Number(position.position.tickUpper),
+    poolRangeLowerPrice: Number.isFinite(position.rangePriceLower) ? position.rangePriceLower : null,
+    poolRangeUpperPrice: Number.isFinite(position.rangePriceUpper) ? position.rangePriceUpper : null,
+    poolCurrentPrice: Number.isFinite(position.price0) ? position.price0 : null
+  };
+}
 
-  for (const row of (vfatClCurrentRows || [])) {
+function annotateProtocolDisplay(rows, { isVfat = false } = {}) {
+  return (rows || []).map((row) => ({
+    ...row,
+    source: isVfat ? "vfat" : (row.source || "standard"),
+    protocolDisplay: isVfat ? `${row.protocol} (VFat)` : (row.protocolDisplay || row.protocol)
+  }));
+}
+
+function mergeOpenRowsWithVfatPreference(standardRows, vfatRows) {
+  const mergedByKey = new Map();
+  let dedupeCount = 0;
+
+  for (const row of (standardRows || [])) {
     const key = normalizePositionIdentityKey(row.tokenContract, row.tokenIdHex);
-    const poolIdentity = row.poolPair
-      ? `${row.protocol || "unknown"}:${row.poolPair}:${Number.isFinite(row.poolFee) ? row.poolFee : "na"}`
-      : null;
-    summaryByKey.set(key, {
-      pooledUsd: Number.isFinite(row.currentPoolUsd) ? row.currentPoolUsd : null,
-      claimableUsd: Number.isFinite(row.vfatClaimableNowUsd) ? row.vfatClaimableNowUsd : null,
-      inRange: typeof row.vfatInRange === "boolean" ? row.vfatInRange : null,
-      poolIdentity
-    });
+    mergedByKey.set(key, row);
   }
 
-  for (const position of (openPositions || [])) {
-    const key = normalizePositionIdentityKey(NFPM_ADDRESS, `0x${BigInt(position.tokenId).toString(16)}`);
-    summaryByKey.set(key, {
-      pooledUsd: Number.isFinite(position.pooledUsd) ? position.pooledUsd : null,
-      claimableUsd: Number.isFinite(position.claimableUsd) ? position.claimableUsd : null,
-      inRange: typeof position.inRange === "boolean" ? position.inRange : null,
-      poolIdentity: position.poolAddress ? position.poolAddress.toLowerCase() : null
-    });
+  for (const row of (vfatRows || [])) {
+    const key = normalizePositionIdentityKey(row.tokenContract, row.tokenIdHex);
+    if (mergedByKey.has(key)) {
+      dedupeCount += 1;
+    }
+    mergedByKey.set(key, row);
   }
 
+  const openRows = [...mergedByKey.values()].sort((a, b) => {
+    const aUsd = Number.isFinite(a.currentPoolUsd) ? a.currentPoolUsd : -Infinity;
+    const bUsd = Number.isFinite(b.currentPoolUsd) ? b.currentPoolUsd : -Infinity;
+    return bUsd - aUsd;
+  });
+  return {
+    openRows,
+    dedupeCount
+  };
+}
+
+function buildUnifiedSummaryTotals(openRows) {
   let pooledUsd = 0;
   let claimableUsd = 0;
   let inRangeCount = 0;
   let rangeConsideredCount = 0;
   const uniquePools = new Set();
 
-  for (const summary of summaryByKey.values()) {
-    if (Number.isFinite(summary.pooledUsd)) {
-      pooledUsd += summary.pooledUsd;
+  for (const row of (openRows || [])) {
+    if (Number.isFinite(row.currentPoolUsd)) {
+      pooledUsd += row.currentPoolUsd;
     }
-    if (Number.isFinite(summary.claimableUsd)) {
-      claimableUsd += summary.claimableUsd;
+    if (Number.isFinite(row.vfatClaimableNowUsd)) {
+      claimableUsd += row.vfatClaimableNowUsd;
     }
-    if (typeof summary.inRange === "boolean") {
+    if (typeof row.vfatInRange === "boolean") {
       rangeConsideredCount += 1;
-      if (summary.inRange) {
+      if (row.vfatInRange) {
         inRangeCount += 1;
       }
     }
-    if (summary.poolIdentity) {
-      uniquePools.add(summary.poolIdentity);
+    if (row.poolPair) {
+      uniquePools.add(`${row.protocol || "unknown"}:${row.poolPair}:${Number.isFinite(row.poolFee) ? row.poolFee : "na"}`);
     }
   }
 
-  const openCount = summaryByKey.size;
+  const openCount = (openRows || []).length;
   const rangeExcludedCount = openCount - rangeConsideredCount;
 
   return {
@@ -2610,12 +2640,13 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
   const uniqueAddresses = [...new Set(rawPositions.flatMap((item) => [item.token0.address, item.token1.address]))];
   const prices = await getPrices(uniqueAddresses, apiKey);
   const positions = rawPositions.map((item) => enrichValues(item, prices));
-  const openPositions = positions.filter((item) => item.liquidity > 0n);
-  const exitedPositions = positions.filter((item) => item.liquidity === 0n);
+  const standardOpenPositions = positions.filter((item) => item.liquidity > 0n);
+  const standardRowsBase = standardOpenPositions.map((position) => normalizeStandardOpenPositionRow(position, owner));
+
+  onStatus("Computing 24h fees, emissions, and APR for wallet-held CL positions...");
+  const standardRowsEnriched = await enrichCurrentRowsWith24hMetrics(standardRowsBase, apiKey, provider, onStatus);
+
   const vfatData = {
-    directDeployedContracts: [],
-    factoryDeployedContracts: [],
-    deployedContracts: [],
     vfatContracts: [],
     vfatClCurrentRows: [],
     vfatClCurrentTokenCount: 0,
@@ -2627,9 +2658,6 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
 
   try {
     const fetchedVfat = await fetchVFatClDataForWallet(owner, apiKey, provider, onStatus);
-    vfatData.directDeployedContracts = fetchedVfat.directDeployedContracts;
-    vfatData.factoryDeployedContracts = fetchedVfat.factoryDeployedContracts;
-    vfatData.deployedContracts = fetchedVfat.deployedContracts;
     vfatData.vfatContracts = fetchedVfat.vfatContracts;
     vfatData.vfatClCurrentRows = fetchedVfat.vfatClCurrentRows;
     vfatData.vfatClCurrentTokenCount = fetchedVfat.vfatClCurrentTokenCount;
@@ -2640,15 +2668,15 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
     vfatData.vfatClError = error?.message || "Failed to fetch VFat CL position transfers.";
   }
 
-  const unifiedTotals = buildUnifiedSummaryTotals(openPositions, vfatData.vfatClCurrentRows);
+  const standardRows = annotateProtocolDisplay(standardRowsEnriched, { isVfat: false });
+  const vfatRows = annotateProtocolDisplay(vfatData.vfatClCurrentRows, { isVfat: true });
+  const mergedOpen = mergeOpenRowsWithVfatPreference(standardRows, vfatRows);
+  const unifiedTotals = buildUnifiedSummaryTotals(mergedOpen.openRows);
 
   return {
     owner,
-    openPositions,
-    exitedPositions,
-    directDeployedContracts: vfatData.directDeployedContracts,
-    factoryDeployedContracts: vfatData.factoryDeployedContracts,
-    deployedContracts: vfatData.deployedContracts,
+    openRows: mergedOpen.openRows,
+    openRowsDedupeCount: mergedOpen.dedupeCount,
     vfatContracts: vfatData.vfatContracts,
     vfatClCurrentRows: vfatData.vfatClCurrentRows,
     vfatClCurrentTokenCount: vfatData.vfatClCurrentTokenCount,
@@ -2660,6 +2688,7 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
       pooledUsd: unifiedTotals.pooledUsd,
       claimableUsd: unifiedTotals.claimableUsd,
       openCount: unifiedTotals.openCount,
+      poolCount: unifiedTotals.poolCount,
       inRangeCount: unifiedTotals.inRangeCount,
       rangeConsideredCount: unifiedTotals.rangeConsideredCount,
       rangeExcludedCount: unifiedTotals.rangeExcludedCount
@@ -2668,7 +2697,7 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
 }
 
 function renderSummary(portfolio) {
-  const { owner, openPositions, totals } = portfolio;
+  const { owner, openRows, totals } = portfolio;
   const outOfRange = Math.max(0, totals.rangeConsideredCount - totals.inRangeCount);
   renderAccountBadge(owner);
   els.walletHeadline.textContent = shortenAddress(owner);
@@ -2684,9 +2713,8 @@ function renderSummary(portfolio) {
       ? `${totals.rangeExcludedCount} pools excluded due to missing live range/price reads`
       : "(In Range / Total)";
   }
-  els.exchangeCountChip.textContent = `${new Set(openPositions.map((item) => item.poolAddress)).size} pool${openPositions.length === 1 ? "" : "s"}`;
-  els.openSectionTitle.textContent = `Open LP positions (${portfolio.openPositions.length})`;
-  els.exitedSectionTitle.textContent = `Exited LP positions (${portfolio.exitedPositions.length})`;
+  els.exchangeCountChip.textContent = `${totals.poolCount} pool${totals.poolCount === 1 ? "" : "s"}`;
+  els.openSectionTitle.textContent = `Open LP positions (${openRows.length})`;
   if (totals.openCount) {
     const exclusionNote = totals.rangeExcludedCount > 0 ? ` (${totals.rangeExcludedCount} excluded)` : "";
     setStatus(`${totals.inRangeCount} in range, ${outOfRange} out of range${exclusionNote}.`, "success");
@@ -2695,131 +2723,30 @@ function renderSummary(portfolio) {
   }
 }
 
-function createTokenBreakdown(symbolA, valueA, symbolB, valueB) {
-  return `${formatToken(valueA)} ${symbolA}<br>${formatToken(valueB)} ${symbolB}`;
-}
+function renderOpenSectionDiagnostics(portfolio) {
+  const vfatCount = portfolio.vfatContracts.length;
+  const vfatPositionCount = portfolio.vfatClCurrentRows.length;
+  const uncertainCount = portfolio.vfatClUncertainCount;
 
-function renderPositionCard(position) {
-  const denominator = Number(position.position.tickUpper) - Number(position.position.tickLower) || 1;
-  const rangePercent = clamp((position.currentTick - Number(position.position.tickLower)) / denominator, 0, 1) * 100;
-  const card = document.createElement("article");
-  card.className = "position-card";
-  const statusClass = position.inRange ? "in-range" : "out-range";
-  const statusLabel = position.inRange ? "In range" : "Out of range";
-  const protocolLabel = CL_PROTOCOL_BY_MANAGER.get((position.positionManager || "").toLowerCase()) || "Uniswap v3";
-  const priceQuote = Number.isFinite(position.price0)
-    ? `1 ${position.token0.symbol} = ${formatToken(position.price0, 4)} ${position.token1.symbol}`
-    : "n/a";
-
-  card.innerHTML = `
-    <div class="position-head">
-      <div>
-        <div class="pair-title">
-          <div class="token-stack">
-            <span class="token-pill ${tokenClass(position.token0.symbol)}">${position.token0.symbol.slice(0, 2)}</span>
-            <span class="token-pill ${tokenClass(position.token1.symbol)}">${position.token1.symbol.slice(0, 2)}</span>
-          </div>
-          <h3>${position.token0.symbol}/${position.token1.symbol}</h3>
-          <span class="chip fee">${formatFeeTier(position.position.fee)}</span>
-        </div>
-        <div class="chip-row">
-          <span class="chip ${statusClass}">${statusLabel}</span>
-          <span class="chip protocol">${protocolLabel}</span>
-        </div>
-      </div>
-
-      <div class="position-meta mono">
-        <span class="position-meta__item">NFT #${position.tokenId.toString()}</span>
-        <span class="position-meta__item">tick ${position.currentTick}</span>
-        <span class="position-meta__item">${position.position.tickLower} -> ${position.position.tickUpper}</span>
-        <span class="position-meta__item">pool ${shortenAddress(position.poolAddress)}</span>
-      </div>
-    </div>
-
-    <div class="metric-grid">
-      <div class="metric-card">
-        <p class="field-label">pooled assets</p>
-        <div class="summary-value">${formatUsd(position.pooledUsd)}</div>
-        <div class="metric-sub">${createTokenBreakdown(position.token0.symbol, position.pooled0, position.token1.symbol, position.pooled1)}</div>
-      </div>
-
-      <div class="metric-card">
-        <p class="field-label">claimable now</p>
-        <div class="summary-value">${formatUsd(position.claimableUsd)}</div>
-        <div class="metric-sub">${createTokenBreakdown(position.token0.symbol, position.claimable0, position.token1.symbol, position.claimable1)}</div>
-      </div>
-
-      <div class="metric-card">
-        <p class="field-label">current price</p>
-        <div class="summary-value">${priceQuote}</div>
-        <div class="metric-sub">using live pool tick on Base</div>
-      </div>
-
-      <div class="metric-card">
-        <p class="field-label">liquidity</p>
-        <div class="summary-value">${formatCompactNumber(Number(position.liquidity))}</div>
-        <div class="metric-sub">raw Uniswap liquidity units</div>
-      </div>
-    </div>
-
-    <div class="range-wrap">
-      <div class="range-caption">
-        <p class="note">range ${formatToken(position.rangePriceLower, 4)} -> ${formatToken(position.rangePriceUpper, 4)} ${position.token1.symbol} per ${position.token0.symbol}</p>
-        <p class="note">${statusLabel}</p>
-      </div>
-      <div class="range-track">
-        <div class="range-pointer ${position.inRange ? "" : "outside"}" style="left:${rangePercent}%"></div>
-      </div>
-    </div>
-
-    <div class="detail-grid">
-      <div class="detail-card">
-        <p class="detail-label">token prices</p>
-        <div class="detail-value mono">
-          ${position.token0.symbol}: ${position.token0Price ? formatUsd(position.token0Price) : "n/a"}<br>
-          ${position.token1.symbol}: ${position.token1Price ? formatUsd(position.token1Price) : "n/a"}
-        </div>
-      </div>
-
-      <div class="detail-card">
-        <p class="detail-label">contract addresses</p>
-        <div class="detail-value mono">
-          ${position.token0.symbol}: ${shortenAddress(position.token0.address)}<br>
-          ${position.token1.symbol}: ${shortenAddress(position.token1.address)}
-        </div>
-      </div>
-
-      <div class="detail-card">
-        <p class="detail-label">calculation note</p>
-        <div class="detail-value">
-          Claimable value is derived from live fee-growth math and may include any tokens currently owed to the NFT.
-        </div>
-      </div>
-    </div>
-  `;
-
-  return card;
-}
-
-function renderPositions(portfolio) {
-  els.openPositions.innerHTML = "";
-  els.exitedPositions.innerHTML = "";
-
-  if (!portfolio.openPositions.length) {
-    els.openEmpty.classList.remove("hidden");
-  } else {
-    els.openEmpty.classList.add("hidden");
-    for (const position of portfolio.openPositions) {
-      els.openPositions.appendChild(renderPositionCard(position));
-    }
+  if (els.vfatContractsCountChip) {
+    els.vfatContractsCountChip.textContent = `${vfatCount} VFat contract${vfatCount === 1 ? "" : "s"}`;
   }
-
-  if (!portfolio.exitedPositions.length) {
-    els.exitedEmpty.classList.remove("hidden");
-  } else {
-    els.exitedEmpty.classList.add("hidden");
-    for (const position of portfolio.exitedPositions) {
-      els.exitedPositions.appendChild(renderPositionCard(position));
+  if (els.vfatCurrentCountChip) {
+    els.vfatCurrentCountChip.textContent = `${vfatPositionCount} VFat position${vfatPositionCount === 1 ? "" : "s"}`;
+  }
+  if (els.vfatUncertainCountChip) {
+    els.vfatUncertainCountChip.textContent = `${uncertainCount} uncertain`;
+  }
+  if (els.openDedupeStatus) {
+    els.openDedupeStatus.textContent = `Duplicate policy: prefer VFat rows when tokenContract + tokenIdHex collide. This refresh merged ${portfolio.openRowsDedupeCount} duplicate${portfolio.openRowsDedupeCount === 1 ? "" : "s"}.`;
+  }
+  if (els.vfatErrorText) {
+    if (portfolio.vfatClError) {
+      els.vfatErrorText.textContent = `VFat CL pipeline warning: ${portfolio.vfatClError}`;
+      els.vfatErrorText.classList.remove("hidden");
+    } else {
+      els.vfatErrorText.textContent = "";
+      els.vfatErrorText.classList.add("hidden");
     }
   }
 }
@@ -2922,7 +2849,7 @@ function renderCurrentClRow(row) {
   const qualityFlagClass = qualityIsFull ? "cl-flag--full" : "cl-flag--partial";
   const qualityFlagLabel = qualityIsFull ? "full data" : "partial data";
   const safeQualityDetail = escapeHtml(quality.detail || "incomplete metrics");
-  const safeProtocol = escapeHtml(row.protocol);
+  const safeProtocol = escapeHtml(row.protocolDisplay || row.protocol);
   const safePoolPair = escapeHtml(row.poolPair || "Unknown/Unknown");
   const safeFee = Number.isFinite(row.poolFee) ? escapeHtml(formatFeeTier(row.poolFee)) : "n/a";
   const rangeCurrentDisplay = buildRangeCurrentDisplay(row);
@@ -2957,63 +2884,22 @@ function renderCurrentClRow(row) {
   return tr;
 }
 
-function renderVFatSection(portfolio) {
-  const directCount = portfolio.directDeployedContracts.length;
-  const factoryCount = portfolio.factoryDeployedContracts.length;
-  const deployedCount = portfolio.deployedContracts.length;
-  const vfatCount = portfolio.vfatContracts.length;
-  const tokenCount = portfolio.vfatClCurrentTokenCount;
-  const currentCount = portfolio.vfatClCurrentRows.length;
-  const ownedByVfatCount = portfolio.vfatClOwnedByVfatCount;
-  const externalizedCount = portfolio.vfatClExternalizedCount;
-  const uncertainCount = portfolio.vfatClUncertainCount;
+function renderOpenRowsTable(portfolio) {
+  els.openTableBody.innerHTML = "";
 
-  els.vfatSectionTitle.textContent = `VFat CL positions (Base) (${tokenCount})`;
-  els.vfatDeployedCountChip.textContent = `${directCount} direct deployment${directCount === 1 ? "" : "s"}`;
-  els.vfatFactoryCountChip.textContent = `${factoryCount} factory deployment${factoryCount === 1 ? "" : "s"}`;
-  els.vfatContractsCountChip.textContent = `${vfatCount} VFat contract${vfatCount === 1 ? "" : "s"}`;
-  els.vfatCurrentCountChip.textContent = `${currentCount} active positions`;
-  els.vfatOwnedByVfatCountChip.textContent = `${ownedByVfatCount} owned by VFat`;
-  els.vfatExternalizedCountChip.textContent = `${externalizedCount} externalized`;
-  els.vfatUncertainCountChip.textContent = `${uncertainCount} uncertain`;
-
-  els.vfatCurrentTableBody.innerHTML = "";
-  els.vfatErrorText.classList.add("hidden");
-  els.vfatEmptyNoDeployments.classList.add("hidden");
-  els.vfatEmptyNoContracts.classList.add("hidden");
-  els.vfatCurrentEmpty.classList.add("hidden");
-
-  if (portfolio.vfatClError) {
-    els.vfatErrorText.textContent = `VFat CL pipeline warning: ${portfolio.vfatClError}`;
-    els.vfatErrorText.classList.remove("hidden");
-  }
-
-  if (deployedCount === 0) {
-    els.vfatEmptyNoDeployments.classList.remove("hidden");
+  if (!portfolio.openRows.length) {
+    els.openEmpty.classList.remove("hidden");
     return;
   }
 
-  if (vfatCount === 0) {
-    els.vfatEmptyNoContracts.classList.remove("hidden");
-    return;
-  }
-
-  if (!currentCount) {
-    els.vfatCurrentEmpty.classList.remove("hidden");
-  } else {
-    const sortedRows = [...portfolio.vfatClCurrentRows].sort((a, b) => {
-      const aUsd = Number.isFinite(a.currentPoolUsd) ? a.currentPoolUsd : -Infinity;
-      const bUsd = Number.isFinite(b.currentPoolUsd) ? b.currentPoolUsd : -Infinity;
-      return bUsd - aUsd;
-    });
-    for (const [index, row] of sortedRows.entries()) {
-      const tr = renderCurrentClRow(row);
-      if (!prefersReducedMotion()) {
-        tr.classList.add("cl-row--stagger");
-        tr.style.setProperty("--row-delay", `${Math.min(index * 18, 220)}ms`);
-      }
-      els.vfatCurrentTableBody.appendChild(tr);
+  els.openEmpty.classList.add("hidden");
+  for (const [index, row] of portfolio.openRows.entries()) {
+    const tr = renderCurrentClRow(row);
+    if (!prefersReducedMotion()) {
+      tr.classList.add("cl-row--stagger");
+      tr.style.setProperty("--row-delay", `${Math.min(index * 18, 220)}ms`);
     }
+    els.openTableBody.appendChild(tr);
   }
 }
 
@@ -3032,24 +2918,16 @@ function clearDashboard() {
   }
   els.exchangeCountChip.textContent = "0 pools";
   els.openSectionTitle.textContent = "Open LP positions (0)";
-  els.exitedSectionTitle.textContent = "Exited LP positions (0)";
-  els.openPositions.innerHTML = "";
-  els.exitedPositions.innerHTML = "";
+  els.openTableBody.innerHTML = "";
   els.openEmpty.classList.remove("hidden");
-  els.exitedEmpty.classList.remove("hidden");
-  els.vfatSectionTitle.textContent = "VFat CL positions (Base)";
-  els.vfatDeployedCountChip.textContent = "0 direct deployments";
-  els.vfatFactoryCountChip.textContent = "0 factory deployments";
   els.vfatContractsCountChip.textContent = "0 VFat contracts";
-  els.vfatCurrentCountChip.textContent = "0 active positions";
-  els.vfatOwnedByVfatCountChip.textContent = "0 owned by VFat";
-  els.vfatExternalizedCountChip.textContent = "0 externalized";
+  els.vfatCurrentCountChip.textContent = "0 VFat positions";
   els.vfatUncertainCountChip.textContent = "0 uncertain";
-  els.vfatCurrentTableBody.innerHTML = "";
-  els.vfatCurrentEmpty.classList.add("hidden");
+  if (els.openDedupeStatus) {
+    els.openDedupeStatus.textContent = "Duplicate policy: prefer VFat rows when tokenContract + tokenIdHex collide. This refresh merged 0 duplicates.";
+  }
+  els.vfatErrorText.textContent = "";
   els.vfatErrorText.classList.add("hidden");
-  els.vfatEmptyNoDeployments.classList.remove("hidden");
-  els.vfatEmptyNoContracts.classList.add("hidden");
 }
 
 async function runLookup({ openSettingsOnMissing = false } = {}) {
@@ -3084,8 +2962,8 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
     setBusy(true, "Reading Base contracts...");
     const portfolio = await fetchPortfolio(wallet, apiKey, (message) => setStatus(message));
     renderSummary(portfolio);
-    renderPositions(portfolio);
-    renderVFatSection(portfolio);
+    renderOpenSectionDiagnostics(portfolio);
+    renderOpenRowsTable(portfolio);
     didRender = true;
     if (els.lastUpdatedText) {
       els.lastUpdatedText.textContent = `Last updated ${formatTimeStamp(new Date())}`;

@@ -68,88 +68,43 @@
       <div class="section-head">
         <div>
           <h2 class="section-title" id="openSectionTitle" data-loading-field>Open LP positions (0)</h2>
-          <p class="note">Built from live Base mainnet contract reads via Alchemy.</p>
+          <p class="note">Unified CL view from wallet-held + VFat-derived Base LP positions.</p>
         </div>
         <div class="chip-row">
           <span class="chip subtle" id="exchangeCountChip" data-loading-field>0 pools</span>
+          <span class="chip subtle" id="vfatContractsCountChip" data-loading-field>0 VFat contracts</span>
+          <span class="chip subtle" id="vfatCurrentCountChip" data-loading-field>0 VFat positions</span>
+          <span class="chip subtle" id="vfatUncertainCountChip" data-loading-field>0 uncertain</span>
           <span class="chip neutral">Base only</span>
         </div>
       </div>
 
-      <div class="position-list" id="openPositions"></div>
+      <p class="note" id="openDedupeStatus" data-loading-field>
+        Duplicate policy: prefer VFat rows when `tokenContract + tokenIdHex` collide. This refresh merged 0 duplicates.
+      </p>
+      <p class="note vfat-error hidden" id="vfatErrorText"></p>
+
+      <div class="cl-table-wrap">
+        <table class="cl-table">
+          <thead>
+            <tr>
+              <th>Protocol</th>
+              <th>Pool</th>
+              <th>Fee</th>
+              <th>Range / Current</th>
+              <th>Available to Claim</th>
+              <th>Fees + Emissions (24h)</th>
+              <th>Total Deposited</th>
+              <th>APR</th>
+            </tr>
+          </thead>
+          <tbody id="openTableBody"></tbody>
+        </table>
+      </div>
+
       <div class="empty-state hidden" id="openEmpty">
         <h3>No open positions found</h3>
-        <p class="help-text">This wallet does not currently own any Base Uniswap v3 position NFTs with non-zero liquidity.</p>
-      </div>
-    </section>
-
-    <section class="section-card">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title" id="exitedSectionTitle" data-loading-field>Exited LP positions (0)</h2>
-          <p class="note">Owned position NFTs with zero liquidity are shown here.</p>
-        </div>
-      </div>
-
-      <div class="position-list" id="exitedPositions"></div>
-      <div class="empty-state hidden" id="exitedEmpty">
-        <h3>No exited positions found</h3>
-        <p class="help-text">If the wallet still owns any zero-liquidity Uniswap v3 NFTs, they will appear here.</p>
-      </div>
-    </section>
-
-    <section class="section-card">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title" id="vfatSectionTitle" data-loading-field>VFat CL positions (Base)</h2>
-          <p class="note">Tracks ERC-721 CL position NFT transfers for Aerodrome SlipStream, PancakeSwap V3, and Uniswap V3 on Base.</p>
-        </div>
-      </div>
-
-      <div class="chip-row" id="vfatStatsRow">
-        <span class="chip subtle" id="vfatDeployedCountChip" data-loading-field>0 direct deployments</span>
-        <span class="chip subtle" id="vfatFactoryCountChip" data-loading-field>0 factory deployments</span>
-        <span class="chip subtle" id="vfatContractsCountChip" data-loading-field>0 VFat contracts</span>
-        <span class="chip subtle" id="vfatCurrentCountChip" data-loading-field>0 active positions</span>
-        <span class="chip subtle" id="vfatOwnedByVfatCountChip" data-loading-field>0 owned by VFat</span>
-        <span class="chip subtle" id="vfatExternalizedCountChip" data-loading-field>0 externalized</span>
-        <span class="chip subtle" id="vfatUncertainCountChip" data-loading-field>0 uncertain</span>
-      </div>
-
-      <p class="note vfat-error hidden" id="vfatErrorText"></p>
-      <div class="cl-panel-grid">
-        <article class="cl-panel">
-          <h3>Currently Active CL Positions</h3>
-          <p class="note">Live owner + non-zero liquidity only (burned and closed positions excluded). 24h APR is annualized from fees + emissions over current USD value.</p>
-          <div class="cl-table-wrap">
-            <table class="cl-table">
-              <thead>
-                <tr>
-                  <th>Protocol</th>
-                  <th>Pool</th>
-                  <th>Fee</th>
-                  <th>Range / Current (hover)</th>
-                  <th>Available to Claim ($)</th>
-                  <th>Fees + Emissions (24h, USD)</th>
-                  <th>Total Deposited (USD)</th>
-                  <th>APR (24h annualized)</th>
-                </tr>
-              </thead>
-              <tbody id="vfatCurrentTableBody"></tbody>
-            </table>
-          </div>
-          <p class="note hidden" id="vfatCurrentEmpty">No active CL positions found.</p>
-        </article>
-      </div>
-
-      <div class="empty-state hidden" id="vfatEmptyNoDeployments">
-        <h3>No deploy-based contracts found</h3>
-        <p class="help-text">No direct deployments (`to = null`) and no matching Sickle factory deployments were found for this wallet on Base.</p>
-      </div>
-
-      <div class="empty-state hidden" id="vfatEmptyNoContracts">
-        <h3>No VFat contracts identified</h3>
-        <p class="help-text">Directly deployed contracts exist, but none matched the strict configured VFat signature rules.</p>
+        <p class="help-text">No active Base CL LP positions were found from wallet-held NFTs or VFat-derived discovery.</p>
       </div>
     </section>
   </div>
@@ -183,6 +138,6 @@
     </section>
   </div>
 
-  <script src="./app.js?v=20260413h"></script>
+  <script src="./app.js?v=20260413i"></script>
 </body>
 </html>
