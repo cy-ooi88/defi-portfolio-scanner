@@ -148,13 +148,13 @@ body::before {
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12);
 }
 
-.summary-account > div {
+.summary-account-text {
   display: grid;
   grid-template-rows: var(--summary-label-row) minmax(0, var(--summary-value-row)) 1fr;
   gap: var(--summary-row-gap);
 }
 
-.summary-account > div::before {
+.summary-account-text::before {
   content: "";
   grid-row: 1;
 }
@@ -1298,11 +1298,11 @@ body::before {
     grid-template-columns: 1fr;
   }
 
-  .summary-account > div {
+  .summary-account-text {
     display: block;
   }
 
-  .summary-account > div::before {
+  .summary-account-text::before {
     content: none;
   }
 
