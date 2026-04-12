@@ -96,6 +96,8 @@ const STORAGE_KEYS = {
   wallet: "defi_scanner_wallet",
   alchemyKey: "defi_scanner_alchemy_key"
 };
+const ACCOUNT_BADGE_SIZE = 56;
+const JAZZICON_MODULE_URL = "https://cdn.jsdelivr.net/npm/@metamask/jazzicon@2.0.0/+esm";
 
 const state = {
   provider: null,
@@ -106,7 +108,10 @@ const state = {
   poolByManagerKey: new Map(),
   txByHash: new Map(),
   ownerAdapterByAddress: new Map(),
-  gaugeRewardTokenByAddress: new Map()
+  gaugeRewardTokenByAddress: new Map(),
+  badgeAddress: "",
+  jazziconFactory: null,
+  jazziconFactoryPromise: null
 };
 
 const els = {
@@ -1954,6 +1959,82 @@ function shortenAddress(address) {
   return `${address.slice(0, 8)}...${address.slice(-6)}`;
 }
 
+function setAccountBadgePlaceholder(label = "LP") {
+  if (!els.accountBadge) {
+    return;
+  }
+  els.accountBadge.textContent = label;
+  els.accountBadge.classList.add("account-badge--placeholder");
+}
+
+function accountBadgeSeed(address) {
+  if (typeof address !== "string" || address.length < 10) {
+    return 0;
+  }
+  const seed = Number.parseInt(address.slice(2, 10), 16);
+  return Number.isFinite(seed) ? seed : 0;
+}
+
+function drawJazzicon(address) {
+  if (!els.accountBadge || typeof state.jazziconFactory !== "function") {
+    return;
+  }
+
+  let iconNode;
+  try {
+    iconNode = state.jazziconFactory(ACCOUNT_BADGE_SIZE, accountBadgeSeed(address));
+  } catch {
+    return;
+  }
+  if (!iconNode || typeof iconNode !== "object" || typeof iconNode.nodeType !== "number") {
+    return;
+  }
+
+  els.accountBadge.replaceChildren(iconNode);
+  els.accountBadge.classList.remove("account-badge--placeholder");
+}
+
+function loadJazziconFactory() {
+  if (typeof state.jazziconFactory === "function") {
+    return Promise.resolve(state.jazziconFactory);
+  }
+  if (!state.jazziconFactoryPromise) {
+    state.jazziconFactoryPromise = import(JAZZICON_MODULE_URL)
+      .then((module) => {
+        const candidate = module?.default || module?.jazzicon || module;
+        if (typeof candidate !== "function") {
+          throw new Error("Jazzicon loader did not return a function.");
+        }
+        state.jazziconFactory = candidate;
+        return candidate;
+      })
+      .catch(() => null);
+  }
+  return state.jazziconFactoryPromise;
+}
+
+function renderAccountBadge(address) {
+  if (!address) {
+    state.badgeAddress = "";
+    setAccountBadgePlaceholder("LP");
+    return;
+  }
+
+  state.badgeAddress = address.toLowerCase();
+  setAccountBadgePlaceholder(address.slice(2, 4).toUpperCase());
+  if (typeof state.jazziconFactory === "function") {
+    drawJazzicon(address);
+    return;
+  }
+
+  loadJazziconFactory().then((factory) => {
+    if (!factory || state.badgeAddress !== address.toLowerCase()) {
+      return;
+    }
+    drawJazzicon(address);
+  });
+}
+
 function shortenHash(hash) {
   if (!hash || typeof hash !== "string") {
     return "n/a";
@@ -2436,7 +2517,7 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
 function renderSummary(portfolio) {
   const { owner, openPositions, totals } = portfolio;
   const outOfRange = Math.max(0, totals.rangeConsideredCount - totals.inRangeCount);
-  els.accountBadge.textContent = owner.slice(2, 4).toUpperCase();
+  renderAccountBadge(owner);
   els.walletHeadline.textContent = shortenAddress(owner);
   els.walletSubline.textContent = `${totals.openCount} active position${totals.openCount === 1 ? "" : "s"} on Base`;
   els.totalValue.textContent = formatUsd(totals.pooledUsd);
@@ -2705,7 +2786,7 @@ function renderVFatSection(portfolio) {
 function clearDashboard() {
   els.walletHeadline.textContent = "Waiting for wallet";
   els.walletSubline.textContent = "Open settings to enter wallet + API key.";
-  els.accountBadge.textContent = "LP";
+  renderAccountBadge("");
   els.totalValue.textContent = "$0.00";
   els.totalClaimable.textContent = "$0.00";
   els.openCount.textContent = "0";
