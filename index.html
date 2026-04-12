@@ -40,36 +40,25 @@
           <div>
             <h1 id="walletHeadline" data-loading-field>Waiting for wallet</h1>
             <p id="walletSubline" data-loading-field>Open settings to enter wallet + API key.</p>
-            <div class="account-chip-row">
-              <span class="chip account">Account</span>
-              <span class="chip base">Base</span>
-              <span class="chip protocol">Uniswap v3</span>
-            </div>
           </div>
         </div>
 
         <div class="summary-metric">
-          <p>assets value</p>
+          <p>LP Value</p>
           <div class="summary-value" id="totalValue" data-loading-field>$0.00</div>
-          <p class="note">live pool value</p>
+          <p class="note"></p>
         </div>
 
         <div class="summary-metric">
-          <p>claimable now</p>
+          <p>Claimable Now</p>
           <div class="summary-value" id="totalClaimable" data-loading-field>$0.00</div>
-          <p class="note">fees plus any owed tokens</p>
+          <p class="note">(Fees + Emissions)</p>
         </div>
 
         <div class="summary-metric">
-          <p>open LPs</p>
-          <div class="summary-value" id="openCount" data-loading-field>0</div>
-          <p class="note">currently owned NFTs</p>
-        </div>
-
-        <div class="summary-metric">
-          <p>range status</p>
+          <p>LP Status</p>
           <div class="summary-value" id="rangeSummary" data-loading-field>0 / 0</div>
-          <p class="note" id="rangeSummaryNote" data-loading-field>in range vs total</p>
+          <p class="note" id="rangeSummaryNote" data-loading-field>(In Range / Total)</p>
         </div>
       </div>
 
@@ -139,10 +128,9 @@
                   <th>Protocol</th>
                   <th>Pool</th>
                   <th>Fee</th>
-                  <th>Range (lower -> upper)</th>
-                  <th>Current price</th>
-                  <th>Fees (24h, USD)</th>
-                  <th>Emissions (24h, USD)</th>
+                  <th>Range / Current (hover)</th>
+                  <th>Available to Claim ($)</th>
+                  <th>Fees + Emissions (24h, USD)</th>
                   <th>Total Deposited (USD)</th>
                   <th>APR (24h annualized)</th>
                 </tr>
@@ -195,6 +183,6 @@
     </section>
   </div>
 
-  <script src="./app.js?v=20260412a"></script>
+  <script src="./app.js?v=20260413h"></script>
 </body>
 </html>

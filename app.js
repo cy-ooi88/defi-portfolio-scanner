@@ -112,7 +112,10 @@ const state = {
   gaugeRewardTokenByAddress: new Map(),
   badgeAddress: "",
   jazziconFactory: null,
-  jazziconFactoryPromise: null
+  jazziconFactoryPromise: null,
+  introPlayed: false,
+  introCleanupTimer: null,
+  updatePulseTimer: null
 };
 
 const els = {
@@ -163,6 +166,98 @@ function setLoadingState(isLoading) {
   for (const field of els.loadingFields) {
     field.classList.toggle("loading-field--busy", isLoading);
   }
+}
+
+function prefersReducedMotion() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function collectIntroTargets() {
+  const targets = [];
+  const seen = new Set();
+  const push = (node) => {
+    if (!node || seen.has(node)) {
+      return;
+    }
+    seen.add(node);
+    targets.push(node);
+  };
+
+  push(document.querySelector(".topbar"));
+  push(document.querySelector(".summary"));
+  for (const section of document.querySelectorAll(".section-card")) {
+    push(section);
+  }
+
+  let cardCount = 0;
+  for (const card of document.querySelectorAll(".position-card")) {
+    if (cardCount >= 10) {
+      break;
+    }
+    push(card);
+    cardCount += 1;
+  }
+  return targets;
+}
+
+function runIntroMotionOnce() {
+  if (state.introPlayed) {
+    return;
+  }
+  state.introPlayed = true;
+
+  if (prefersReducedMotion()) {
+    return;
+  }
+
+  const targets = collectIntroTargets();
+  if (!targets.length) {
+    return;
+  }
+
+  targets.forEach((target, index) => {
+    target.classList.add("motion-intro");
+    target.classList.remove("motion-intro--in");
+    target.style.setProperty("--motion-delay", `${Math.min(index * 42, 420)}ms`);
+  });
+
+  requestAnimationFrame(() => {
+    targets.forEach((target) => target.classList.add("motion-intro--in"));
+  });
+
+  if (state.introCleanupTimer) {
+    clearTimeout(state.introCleanupTimer);
+  }
+  state.introCleanupTimer = setTimeout(() => {
+    targets.forEach((target) => {
+      target.classList.remove("motion-intro", "motion-intro--in");
+      target.style.removeProperty("--motion-delay");
+    });
+    state.introCleanupTimer = null;
+  }, 1300);
+}
+
+function pulseUpdatedFields() {
+  if (prefersReducedMotion() || !els.loadingFields.length) {
+    return;
+  }
+
+  for (const field of els.loadingFields) {
+    field.classList.remove("loading-field--updated");
+    // Restart animation class for every refresh cycle.
+    void field.offsetWidth;
+    field.classList.add("loading-field--updated");
+  }
+
+  if (state.updatePulseTimer) {
+    clearTimeout(state.updatePulseTimer);
+  }
+  state.updatePulseTimer = setTimeout(() => {
+    for (const field of els.loadingFields) {
+      field.classList.remove("loading-field--updated");
+    }
+    state.updatePulseTimer = null;
+  }, 700);
 }
 
 function setBusy(isBusy, text = "") {
@@ -2068,23 +2163,68 @@ function formatUsd(value) {
   if (!Number.isFinite(value)) {
     return "n/a";
   }
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2
-  }).format(value);
+  return formatUsdWithRules(value, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatUsdFixed(value, fractionDigits = 2) {
   if (!Number.isFinite(value)) {
     return "n/a";
   }
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return formatUsdWithRules(value, {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits
-  }).format(value);
+  });
+}
+
+function toSubscriptDigits(text) {
+  return String(text).split("").map((char) => {
+    const code = char.charCodeAt(0);
+    if (code >= 48 && code <= 57) {
+      return String.fromCodePoint(0x2080 + (code - 48));
+    }
+    return char;
+  }).join("");
+}
+
+function formatTinyUsd(absValue, shownDigits = 3) {
+  if (!(absValue > 0) || absValue >= 0.01) {
+    return null;
+  }
+  const fixed = absValue.toFixed(20);
+  const decimalPart = fixed.includes(".") ? fixed.split(".")[1] : "";
+  if (!decimalPart) {
+    return null;
+  }
+  let zeroCount = 0;
+  while (zeroCount < decimalPart.length && decimalPart[zeroCount] === "0") {
+    zeroCount += 1;
+  }
+  if (zeroCount < 2 || zeroCount >= decimalPart.length) {
+    return null;
+  }
+  const significantDigits = (decimalPart.slice(zeroCount) + "000").slice(0, shownDigits);
+  return `0.0${toSubscriptDigits(String(zeroCount))}${significantDigits}`;
+}
+
+function formatUsdWithRules(value, { minimumFractionDigits = 2, maximumFractionDigits = 2 } = {}) {
+  if (!Number.isFinite(value)) {
+    return "n/a";
+  }
+
+  const sign = value < 0 ? "-" : "";
+  const absValue = Math.abs(value);
+  const tinyDisplay = formatTinyUsd(absValue, 3);
+  if (tinyDisplay) {
+    return `${sign}$${tinyDisplay}`;
+  }
+
+  const resolvedMin = absValue < 1 ? Math.max(3, minimumFractionDigits) : minimumFractionDigits;
+  const resolvedMax = absValue < 1 ? Math.max(3, maximumFractionDigits) : maximumFractionDigits;
+  const amountText = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: resolvedMin,
+    maximumFractionDigits: resolvedMax
+  }).format(absValue);
+  return `${sign}$${amountText}`;
 }
 
 function formatToken(value, decimals = 4) {
@@ -2535,12 +2675,14 @@ function renderSummary(portfolio) {
   els.walletSubline.textContent = `${totals.openCount} active position${totals.openCount === 1 ? "" : "s"} on Base`;
   els.totalValue.textContent = formatUsd(totals.pooledUsd);
   els.totalClaimable.textContent = formatUsd(totals.claimableUsd);
-  els.openCount.textContent = String(totals.openCount);
+  if (els.openCount) {
+    els.openCount.textContent = String(totals.openCount);
+  }
   els.rangeSummary.textContent = `${totals.inRangeCount} / ${totals.rangeConsideredCount}`;
   if (els.rangeSummaryNote) {
     els.rangeSummaryNote.textContent = totals.rangeExcludedCount > 0
       ? `${totals.rangeExcludedCount} pools excluded due to missing live range/price reads`
-      : "in range vs total";
+      : "(In Range / Total)";
   }
   els.exchangeCountChip.textContent = `${new Set(openPositions.map((item) => item.poolAddress)).size} pool${openPositions.length === 1 ? "" : "s"}`;
   els.openSectionTitle.textContent = `Open LP positions (${portfolio.openPositions.length})`;
@@ -2564,6 +2706,7 @@ function renderPositionCard(position) {
   card.className = "position-card";
   const statusClass = position.inRange ? "in-range" : "out-range";
   const statusLabel = position.inRange ? "In range" : "Out of range";
+  const protocolLabel = CL_PROTOCOL_BY_MANAGER.get((position.positionManager || "").toLowerCase()) || "Uniswap v3";
   const priceQuote = Number.isFinite(position.price0)
     ? `1 ${position.token0.symbol} = ${formatToken(position.price0, 4)} ${position.token1.symbol}`
     : "n/a";
@@ -2581,19 +2724,15 @@ function renderPositionCard(position) {
         </div>
         <div class="chip-row">
           <span class="chip ${statusClass}">${statusLabel}</span>
-          <span class="chip base">Base</span>
-          <span class="chip protocol">Uniswap v3</span>
-          <span class="chip subtle">NFT #${position.tokenId.toString()}</span>
+          <span class="chip protocol">${protocolLabel}</span>
         </div>
       </div>
 
-      <div class="chip-row">
-        <span class="chip subtle mono">tick ${position.currentTick}</span>
-        <span class="chip subtle mono">${position.position.tickLower} -> ${position.position.tickUpper}</span>
-      </div>
-
-      <div class="right-actions">
-        <span class="chip subtle mono">pool ${shortenAddress(position.poolAddress)}</span>
+      <div class="position-meta mono">
+        <span class="position-meta__item">NFT #${position.tokenId.toString()}</span>
+        <span class="position-meta__item">tick ${position.currentTick}</span>
+        <span class="position-meta__item">${position.position.tickLower} -> ${position.position.tickUpper}</span>
+        <span class="position-meta__item">pool ${shortenAddress(position.poolAddress)}</span>
       </div>
     </div>
 
@@ -2701,42 +2840,119 @@ function metricsQualityView(row) {
   return { chipClass: "warning", chipLabel: "partial", detail: "incomplete metrics" };
 }
 
+function buildRangeCurrentDisplay(row) {
+  const hasRange = Number.isFinite(row.poolRangeLowerPrice) && Number.isFinite(row.poolRangeUpperPrice);
+  const hasCurrent = Number.isFinite(row.poolCurrentPrice);
+  if (!hasRange || !hasCurrent || row.poolRangeUpperPrice <= row.poolRangeLowerPrice) {
+    const fallbackTooltip = "Range: unavailable\nCurrent: unavailable";
+    const safeFallbackTooltip = escapeHtml(fallbackTooltip);
+    return `
+      <div class="range-mini range-mini--na" data-tooltip="${safeFallbackTooltip}" tabindex="0" role="img" aria-label="${safeFallbackTooltip}">
+        <span class="range-mini__label">n/a</span>
+        <span class="range-mini__track">
+          <span class="range-mini__edge range-mini__edge--left"></span>
+          <span class="range-mini__edge range-mini__edge--right"></span>
+          <span class="range-mini__marker range-mini__marker--na" style="left:50%"></span>
+        </span>
+      </div>
+    `;
+  }
+
+  const lower = row.poolRangeLowerPrice;
+  const upper = row.poolRangeUpperPrice;
+  const current = row.poolCurrentPrice;
+  const span = upper - lower;
+  const markerPercent = clamp(((current - lower) / span) * 100, 0, 100);
+  const rangeState = current < lower ? "below range" : current > upper ? "above range" : "in range";
+  const widthPct = lower !== 0 ? (span / Math.abs(lower)) * 100 : Number.NaN;
+  const labelText = Number.isFinite(widthPct) ? formatPercent(widthPct, 2) : "n/a";
+  const label = escapeHtml(labelText);
+  const tooltipText = escapeHtml(
+    `Range: ${formatToken(lower, 6)} -> ${formatToken(upper, 6)}\nCurrent: ${formatToken(current, 6)} (${rangeState})`
+  );
+  const outClass = rangeState === "in range" ? "" : " range-mini--out";
+
+  return `
+    <div class="range-mini${outClass}" data-tooltip="${tooltipText}" tabindex="0" role="img" aria-label="${tooltipText}">
+      <span class="range-mini__label">${label}</span>
+      <span class="range-mini__track">
+        <span class="range-mini__edge range-mini__edge--left"></span>
+        <span class="range-mini__edge range-mini__edge--right"></span>
+        <span class="range-mini__marker" style="left:${markerPercent}%"></span>
+      </span>
+    </div>
+  `;
+}
+
+function buildFeesEmissionsDisplay(row, quality) {
+  const hasFees = Number.isFinite(row.fees24hUsd);
+  const hasEmissions = Number.isFinite(row.emissions24hUsd);
+  const total24hUsd = (hasFees ? row.fees24hUsd : 0) + (hasEmissions ? row.emissions24hUsd : 0);
+  const hasAnyValue = hasFees || hasEmissions;
+  const totalText = hasAnyValue ? formatUsdFixed(total24hUsd, 3) : "n/a";
+  let tooltipText = `Fees: ${hasFees ? formatUsdFixed(row.fees24hUsd, 3) : "n/a"}\nEmissions: ${hasEmissions ? formatUsdFixed(row.emissions24hUsd, 3) : "n/a"}`;
+  if (quality.chipLabel === "full" && quality.detail === "protocol-native data") {
+    tooltipText += "\nFULL / protocol-native data";
+  }
+  const safeTooltipText = escapeHtml(tooltipText);
+  const safeTotalText = escapeHtml(totalText);
+
+  return `<span class="table-tooltip mono" data-tooltip="${safeTooltipText}" tabindex="0">${safeTotalText}</span>`;
+}
+
+function resolveClRangeState(row) {
+  const hasRange = Number.isFinite(row.poolRangeLowerPrice) && Number.isFinite(row.poolRangeUpperPrice);
+  const hasCurrent = Number.isFinite(row.poolCurrentPrice);
+  if (!hasRange || !hasCurrent || row.poolRangeUpperPrice <= row.poolRangeLowerPrice) {
+    return "unknown";
+  }
+  if (row.poolCurrentPrice < row.poolRangeLowerPrice || row.poolCurrentPrice > row.poolRangeUpperPrice) {
+    return "out";
+  }
+  return "in";
+}
+
 function renderCurrentClRow(row) {
   const tr = document.createElement("tr");
   const quality = metricsQualityView(row);
+  const rangeState = resolveClRangeState(row);
+  const qualityIsFull = quality.chipLabel === "full";
+  const rangeFlagClass = rangeState === "out" ? "cl-flag--out" : rangeState === "in" ? "cl-flag--in" : "cl-flag--na";
+  const rangeFlagLabel = rangeState === "out" ? "out of range" : rangeState === "in" ? "in range" : "range n/a";
+  const qualityFlagClass = qualityIsFull ? "cl-flag--full" : "cl-flag--partial";
+  const qualityFlagLabel = qualityIsFull ? "full data" : "partial data";
+  const safeQualityDetail = escapeHtml(quality.detail || "incomplete metrics");
   const safeProtocol = escapeHtml(row.protocol);
   const safePoolPair = escapeHtml(row.poolPair || "Unknown/Unknown");
   const safeFee = Number.isFinite(row.poolFee) ? escapeHtml(formatFeeTier(row.poolFee)) : "n/a";
-  const safeRange = Number.isFinite(row.poolRangeLowerPrice) && Number.isFinite(row.poolRangeUpperPrice)
-    ? `${escapeHtml(formatToken(row.poolRangeLowerPrice, 6))} -> ${escapeHtml(formatToken(row.poolRangeUpperPrice, 6))}`
+  const rangeCurrentDisplay = buildRangeCurrentDisplay(row);
+  const safeAvailableToClaim = Number.isFinite(row.vfatClaimableNowUsd)
+    ? escapeHtml(formatUsd(row.vfatClaimableNowUsd))
     : "n/a";
-  const safeCurrentPrice = Number.isFinite(row.poolCurrentPrice)
-    ? escapeHtml(formatToken(row.poolCurrentPrice, 6))
-    : "n/a";
-  const safeFees24h = Number.isFinite(row.fees24hUsd)
-    ? escapeHtml(formatUsdFixed(row.fees24hUsd, 3))
-    : "n/a";
-  const safeEmissions24h = Number.isFinite(row.emissions24hUsd)
-    ? escapeHtml(formatUsdFixed(row.emissions24hUsd, 3))
-    : "n/a";
+  const feesEmissionsDisplay = buildFeesEmissionsDisplay(row, quality);
   const safeTotalDeposited = Number.isFinite(row.currentPoolUsd)
     ? escapeHtml(formatUsd(row.currentPoolUsd))
     : "n/a";
   const safeApr24h = Number.isFinite(row.apr24hPct)
     ? escapeHtml(formatPercent(row.apr24hPct, 2))
     : "n/a";
-  const safeQualityDetail = escapeHtml(quality.detail || "");
+  tr.className = `cl-row ${qualityIsFull ? "cl-row--full" : "cl-row--partial"} ${rangeState === "out" ? "cl-row--out" : rangeState === "in" ? "cl-row--in" : "cl-row--unknown"}`;
 
   tr.innerHTML = `
     <td>${safeProtocol}</td>
-    <td>${safePoolPair}</td>
-    <td class="mono">${safeFee}</td>
-    <td class="mono">${safeRange}</td>
-    <td class="mono">${safeCurrentPrice}</td>
-    <td class="mono">${safeFees24h}</td>
-    <td class="mono">${safeEmissions24h}<br><span class="chip ${quality.chipClass}">${quality.chipLabel}</span><span class="muted-inline">${safeQualityDetail}</span></td>
-    <td class="mono">${safeTotalDeposited}</td>
-    <td class="mono">${safeApr24h}</td>
+    <td>
+      <div class="cl-cell-main">${safePoolPair}</div>
+      <div class="cl-cell-flags">
+        <span class="cl-flag ${rangeFlagClass}">${rangeFlagLabel}</span>
+        <span class="cl-flag ${qualityFlagClass}" title="${safeQualityDetail}">${qualityFlagLabel}</span>
+      </div>
+    </td>
+    <td class="mono cl-cell-num">${safeFee}</td>
+    <td class="mono range-price-cell">${rangeCurrentDisplay}</td>
+    <td class="mono cl-cell-num">${safeAvailableToClaim}</td>
+    <td class="mono cl-cell-num">${feesEmissionsDisplay}</td>
+    <td class="mono cl-cell-num">${safeTotalDeposited}</td>
+    <td class="mono cl-cell-num">${safeApr24h}</td>
   `;
   return tr;
 }
@@ -2790,8 +3006,13 @@ function renderVFatSection(portfolio) {
       const bUsd = Number.isFinite(b.currentPoolUsd) ? b.currentPoolUsd : -Infinity;
       return bUsd - aUsd;
     });
-    for (const row of sortedRows) {
-      els.vfatCurrentTableBody.appendChild(renderCurrentClRow(row));
+    for (const [index, row] of sortedRows.entries()) {
+      const tr = renderCurrentClRow(row);
+      if (!prefersReducedMotion()) {
+        tr.classList.add("cl-row--stagger");
+        tr.style.setProperty("--row-delay", `${Math.min(index * 18, 220)}ms`);
+      }
+      els.vfatCurrentTableBody.appendChild(tr);
     }
   }
 }
@@ -2802,7 +3023,9 @@ function clearDashboard() {
   renderAccountBadge("");
   els.totalValue.textContent = "$0.00";
   els.totalClaimable.textContent = "$0.00";
-  els.openCount.textContent = "0";
+  if (els.openCount) {
+    els.openCount.textContent = "0";
+  }
   els.rangeSummary.textContent = "0 / 0";
   if (els.rangeSummaryNote) {
     els.rangeSummaryNote.textContent = "in range vs total";
@@ -2856,12 +3079,14 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
     return;
   }
 
+  let didRender = false;
   try {
     setBusy(true, "Reading Base contracts...");
     const portfolio = await fetchPortfolio(wallet, apiKey, (message) => setStatus(message));
     renderSummary(portfolio);
     renderPositions(portfolio);
     renderVFatSection(portfolio);
+    didRender = true;
     if (els.lastUpdatedText) {
       els.lastUpdatedText.textContent = `Last updated ${formatTimeStamp(new Date())}`;
     }
@@ -2874,6 +3099,10 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
     }
   } finally {
     setBusy(false);
+    if (didRender) {
+      runIntroMotionOnce();
+      pulseUpdatedFields();
+    }
   }
 }
 
