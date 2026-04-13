@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BSC PancakeSwap V3 + VFat Positions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">defi_dashboard_</div>
+        <!-- <div class="nav">
+          <span class="active">dashboard</span>
+          <span>base chain</span>
+          <span>uniswap v3</span>
+          <span>positions</span>
+        </div> -->
+      </div>
+      <div class="top-actions">
+        <button class="icon-button" id="settingsButton" type="button" aria-label="Open settings">
+          <i class="fa-solid fa-gear" aria-hidden="true"></i>
+        </button>
+        <button class="icon-button" id="refreshTopButton" type="button" aria-label="Refresh positions">
+          <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+        </button>
+      </div>
+    </header>
+
+    <section class="summary">
+      <div class="summary-head">
+        <div class="summary-account">
+          <div class="account-badge account-badge--placeholder" id="accountBadge">LP</div>
+          <div class="summary-account-text">
+            <h1 id="walletHeadline" data-loading-field>Waiting for wallet</h1>
+            <p id="walletSubline" data-loading-field>Open settings to enter wallet + API key.</p>
+          </div>
+        </div>
+
+        <div class="summary-metric">
+          <p>LP Value</p>
+          <div class="summary-value" id="totalValue" data-loading-field>$0.00</div>
+          <p class="note"></p>
+        </div>
+
+        <div class="summary-metric">
+          <p>Claimable Now</p>
+          <div class="summary-value" id="totalClaimable" data-loading-field>$0.00</div>
+          <p class="note">(Fees + Emissions)</p>
+        </div>
+
+        <div class="summary-metric">
+          <p>LP Status</p>
+          <div class="summary-value" id="rangeSummary" data-loading-field>0 / 0</div>
+          <p class="note" id="rangeSummaryNote" data-loading-field>(In Range / Total)</p>
+        </div>
+      </div>
+
+    </section>
+
+    <section class="section-card">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" id="openSectionTitle" data-loading-field>Open LP positions (0)</h2>
+          <p class="note">Unified CL view from wallet-held + VFat-derived BSC LP positions (PancakeSwap V3 focus).</p>
+        </div>
+        <div class="chip-row">
+          <span class="chip subtle" id="exchangeCountChip" data-loading-field>0 pools</span>
+          <span class="chip subtle" id="vfatContractsCountChip" data-loading-field>0 VFat contracts</span>
+          <span class="chip subtle" id="vfatCurrentCountChip" data-loading-field>0 VFat positions</span>
+          <span class="chip subtle" id="vfatUncertainCountChip" data-loading-field>0 uncertain</span>
+          <span class="chip neutral">BSC only</span>
+        </div>
+      </div>
+
+      <p class="note" id="openDedupeStatus" data-loading-field>
+        Duplicate policy: prefer VFat rows when `tokenContract + tokenIdHex` collide. This refresh merged 0 duplicates.
+      </p>
+      <p class="note vfat-error hidden" id="vfatErrorText"></p>
+
+      <div class="cl-table-wrap">
+        <table class="cl-table">
+          <thead>
+            <tr>
+              <th>Protocol</th>
+              <th>Pool</th>
+              <th>Fee</th>
+              <th>Range / Current</th>
+              <th>Available to Claim</th>
+              <th>Fees + Emissions (24h)</th>
+              <th>Total Deposited</th>
+              <th>APR</th>
+            </tr>
+          </thead>
+          <tbody id="openTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="empty-state hidden" id="openEmpty">
+        <h3>No open positions found</h3>
+        <p class="help-text">No active BSC CL LP positions were found from wallet-held NFTs or VFat-derived discovery.</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="settings-overlay hidden" id="settingsOverlay" aria-hidden="true">
+    <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="settings-head">
+        <h2 id="settingsTitle">Settings</h2>
+        <button class="icon-button" id="settingsCloseButton" type="button" aria-label="Close settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.7 5.3a1 1 0 0 0-1.4 1.4L10.6 12l-5.3 5.3a1 1 0 1 0 1.4 1.4l5.3-5.3 5.3 5.3a1 1 0 1 0 1.4-1.4L13.4 12l5.3-5.3a1 1 0 0 0-1.4-1.4L12 10.6 6.7 5.3Z" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="lookupForm" novalidate>
+        <div class="form-grid">
+          <label class="field">
+            <span class="field-label">wallet address</span>
+            <input id="walletInput" name="wallet" placeholder="0x..." autocomplete="off">
+          </label>
+
+          <label class="field">
+            <span class="field-label">alchemy api key</span>
+            <input id="alchemyInput" name="alchemyKey" type="password" placeholder="Paste your Alchemy key" autocomplete="off">
+          </label>
+        </div>
+        <button class="button settings-submit" id="refreshButton" type="submit">Load / Refresh Positions</button>
+        <p class="note settings-note">Your wallet and key are saved locally in this browser.</p>
+      </form>
+    </section>
+  </div>
+
+  <script src="./new_app.js?v=20260414a"></script>
+</body>
+</html>
