@@ -1,0 +1,24 @@
+{
+  "generatedAt": "2026-04-13T00:00:00.000Z",
+  "chainId": 56,
+  "sourceWallets": [],
+  "sickleFactoryAllowlist": [
+    "0x71d234a3e1dfc161cc1d081e6496e76627baac31"
+  ],
+  "vfatImplementationAllowlist": [
+    "0xfff75d099baee29f447866bc5299cd67c04761c8"
+  ],
+  "clPositionManagers": [
+    {
+      "protocol": "PancakeSwap V3",
+      "address": "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364"
+    },
+    {
+      "protocol": "Uniswap V3",
+      "address": "0x03a520b32c04bf3beef7beb72e919cf822ed34f1"
+    }
+  ],
+  "diagnostics": {
+    "note": "Seed artifact. Rebuild with scripts/bootstrap_bsc_vfat_constants.mjs for wallet-driven deterministic refresh."
+  }
+}
