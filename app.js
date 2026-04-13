@@ -693,6 +693,18 @@ function parseTxSelector(inputData) {
   return inputData.slice(0, 10).toLowerCase();
 }
 
+function isExecutionRevertedNaError(error) {
+  const message = String(error?.message || "");
+  return /execution reverted:\s*NA/i.test(message);
+}
+
+function isRecentPositionActivityWithinWindow(row, blockWindow) {
+  return Number.isFinite(row?.blockNumber)
+    && row.blockNumber > 0
+    && Number.isFinite(blockWindow?.fromBlock)
+    && row.blockNumber >= blockWindow.fromBlock;
+}
+
 async function ethCallAtBlock(apiKey, to, data, blockTag = "latest") {
   return rpcCall(apiKey, "eth_call", [{ to, data }, toBlockTag(blockTag)]);
 }
@@ -1854,12 +1866,8 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
   let pendingNow;
   let pendingStart;
   try {
-    const [nowResult, startResult] = await Promise.all([
-      rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, "latest"]),
-      rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, blockWindow.fromBlockTag])
-    ]);
+    const nowResult = await rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, "latest"]);
     pendingNow = decodeUint256CallResult(nowResult);
-    pendingStart = decodeUint256CallResult(startResult);
   } catch {
     return {
       emissions24hUsd: null,
@@ -1868,6 +1876,23 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
+  }
+  try {
+    const startResult = await rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, blockWindow.fromBlockTag]);
+    pendingStart = decodeUint256CallResult(startResult);
+  } catch (error) {
+    const canUseZeroBaseline = isExecutionRevertedNaError(error) && isRecentPositionActivityWithinWindow(row, blockWindow);
+    if (canUseZeroBaseline) {
+      pendingStart = 0n;
+    } else {
+      return {
+        emissions24hUsd: null,
+        emissions24hBreakdown: [],
+        pendingEmissionsNowUsd: null,
+        metricsQuality: "partial",
+        metricsReason: "partial_call_failed"
+      };
+    }
   }
 
   let realizedAttributed = 0n;
@@ -3222,6 +3247,9 @@ function buildFeesEmissionsDisplay(row, quality) {
 }
 
 function resolveClRangeState(row) {
+  if ((row.positionType || "cl") === "aerodrome_v2") {
+    return "in";
+  }
   const hasRange = Number.isFinite(row.poolRangeLowerPrice) && Number.isFinite(row.poolRangeUpperPrice);
   const hasCurrent = Number.isFinite(row.poolCurrentPrice);
   if (!hasRange || !hasCurrent || row.poolRangeUpperPrice <= row.poolRangeLowerPrice) {
