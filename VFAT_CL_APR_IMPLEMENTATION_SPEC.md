@@ -1,7 +1,7 @@
-# VFat CL APR (Base) - Deterministic Reimplementation Spec
+# VFat CL + Aerodrome V2 APR (Base) - Deterministic Reimplementation Spec
 
 ## 1. Goal
-This document is a strict reimplementation contract for the VFat CL pipeline in this repo.
+This document is a strict reimplementation contract for the VFat pipeline in this repo, covering CL NFTs and Aerodrome V2 gauge-staked LP positions.
 
 If another LLM (or engineer) follows this spec exactly, it should reproduce the same behavior and outputs without reading this repo's code.
 
@@ -13,16 +13,18 @@ If another LLM (or engineer) follows this spec exactly, it should reproduce the 
   - Aerodrome SlipStream
   - PancakeSwap V3
   - Uniswap V3
+- Supported non-CL protocol path:
+  - Aerodrome V2 gauges (fungible LP staking)
 - 24h window: block timestamp based (`latest.timestamp - 86400`)
 - APR annualization factor: `365`
 
 ## 3. Output fields (current UI contract)
-For each currently active VFat CL position row:
+For each currently active VFat row (CL or Aerodrome V2):
 - `Protocol`
 - `Pool` (token symbol pair)
 - `Fee`
-- `Range (lower -> upper)` (price = token1 per token0)
-- `Current price` (token1 per token0)
+- `Range (lower -> upper)` (price = token1 per token0; `n/a` for Aerodrome V2)
+- `Current price` (token1 per token0; `n/a` for Aerodrome V2)
 - `Fees (24h, USD)` (3 decimals)
 - `Emissions (24h, USD)` (3 decimals or `n/a`)
 - `Total Deposited (USD)` (2 decimals)
@@ -68,6 +70,10 @@ Collect event topics (must query both):
 - `ZeroAddress = 0x0000000000000000000000000000000000000000`
 - `SECONDS_PER_DAY = 86400`
 
+### 4.5 Aerodrome V2 constants
+- Voter: `0x16613524e02ad97edfef371bc883f2f5d6c480a5`
+- V2 pair factory: `0x420dd381b31aef6683db6b902084cb0ffece40da`
+
 ## 5. RPC/API methods required
 - `alchemy_getAssetTransfers` (with pagination via `pageKey`)
 - `eth_getTransactionReceipt`
@@ -100,7 +106,9 @@ Collect event topics (must query both):
 
 ## 6.2 Current active row (`CurrentClRow`)
 Required fields used in APR and rendering:
+- `positionType: "cl" | "aerodrome_v2"`
 - `protocol`, `poolPair`, `poolFee`
+- `poolStable: bool | null`
 - `poolTickLower`, `poolTickUpper`
 - `poolRangeLowerPrice`, `poolRangeUpperPrice`, `poolCurrentPrice`
 - `currentOwner`, `ownerScope`, `ownerCheck`
@@ -167,6 +175,19 @@ Common params:
 Map each transfer to `ClTransferRow`.
 Sort ascending by `(blockNumber, txHash, sortRef)` when deriving state.
 
+### Step 5B: Discover Aerodrome V2 gauges per VFat contract
+For each identified VFat contract:
+- query ERC20 transfers both directions with `alchemy_getAssetTransfers`:
+  - outbound: `fromAddress = vfatContract`
+  - inbound: `toAddress = vfatContract`
+  - `fromBlock = "0x0"`, `toBlock = "latest"`, paginated
+- collect counterparties from transfer `from/to`
+- keep only counterparties where `voter.isGauge(counterparty) == true`
+- keep only gauges with active stake:
+  - `gauge.balanceOf(vfatContract) > 0`
+- keep only Aerodrome V2 gauges:
+  - `v2PairFactory.isPool(gauge.stakingToken()) == true`
+
 ### Step 6: Derive current ownership candidates
 Group history by `tokenKey`.
 For each group:
@@ -201,6 +222,8 @@ Then update row with live values:
    - `toBlockTag = hex(latest.number)`
 
 ### Step 9: Classify owner adapter
+This step applies to CL rows only.
+
 For each active row, classify `currentOwner`:
 
 1. If `eth_getCode(currentOwner)` is empty -> `direct_owner`
@@ -289,6 +312,35 @@ Only valid if `adapterType == pancake_masterchef`, else partial-unclassified.
 - Emissions not applicable:
   - `emissions24hUsd = 0`
   - metrics full
+
+### 11.4 Aerodrome V2 gauge LP
+For each active V2 row:
+1. Determine staked LP amount:
+   - `stake = gauge.balanceOf(vfat)`
+2. Value current deposit from LP share:
+   - `pool = gauge.stakingToken()`
+   - read pool reserves + total supply
+   - `amount0Raw = stake * reserve0 / totalSupply`
+   - `amount1Raw = stake * reserve1 / totalSupply`
+   - convert to USD by token prices => `currentPoolUsd`
+3. Fees policy:
+   - `fees24hUsd = 0`
+4. Emissions:
+   - `pendingNow = gauge.earned(vfat)` at latest
+   - `pendingStart = gauge.earned(vfat)` at fromBlock
+   - `pendingDelta = max(pendingNow - pendingStart, 0)`
+   - realized transfers in window:
+     - ERC20 transfers with `fromAddress = gauge`, `toAddress = vfat`, `contract = rewardToken`
+   - `emissionsRaw = pendingDelta + realized`
+   - convert to USD with reward token price
+5. Claimable now:
+   - `vfatClaimableNowUsd = pendingNowUsd` (emissions only)
+6. APR:
+   - `apr24hPct = (emissions24hUsd / currentPoolUsd) * 365 * 100` when denominator > 0
+7. Range fields:
+   - `poolTickLower`, `poolTickUpper`, `poolRange*`, `poolCurrentPrice`, `vfatInRange` are `null`
+8. Quality:
+   - if reward price missing or required call fails, keep row with `metricsReason = partial_call_failed`
 
 ### Step 12: Current deposited USD denominator
 Compute from **current liquidity composition**, not historical notional:
