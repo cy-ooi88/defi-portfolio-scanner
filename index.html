@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Base Uniswap v3 Positions</title>
+  <title>Multi-Chain CL LP Positions</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -68,14 +68,14 @@
       <div class="section-head">
         <div>
           <h2 class="section-title" id="openSectionTitle" data-loading-field>Open LP positions (0)</h2>
-          <p class="note">Unified CL view from wallet-held + VFat-derived Base LP positions.</p>
+          <p class="note">Unified CL view from wallet-held + VFat-derived positions across Base + BSC.</p>
         </div>
         <div class="chip-row">
           <span class="chip subtle" id="exchangeCountChip" data-loading-field>0 pools</span>
           <span class="chip subtle" id="vfatContractsCountChip" data-loading-field>0 VFat contracts</span>
           <span class="chip subtle" id="vfatCurrentCountChip" data-loading-field>0 VFat positions</span>
           <span class="chip subtle" id="vfatUncertainCountChip" data-loading-field>0 uncertain</span>
-          <span class="chip neutral">Base only</span>
+          <span class="chip neutral">Base + BSC</span>
         </div>
       </div>
 
@@ -104,7 +104,7 @@
 
       <div class="empty-state hidden" id="openEmpty">
         <h3>No open positions found</h3>
-        <p class="help-text">No active Base CL LP positions were found from wallet-held NFTs or VFat-derived discovery.</p>
+        <p class="help-text">No active CL LP positions were found on Base + BSC from wallet-held NFTs or VFat-derived discovery.</p>
       </div>
     </section>
   </div>
@@ -138,6 +138,6 @@
     </section>
   </div>
 
-  <script src="./app.js?v=20260413i"></script>
+  <script src="./app.js?v=20260414a"></script>
 </body>
 </html>

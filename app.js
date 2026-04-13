@@ -1,8 +1,53 @@
 const { ethers } = window;
 
-const BASE_CHAIN_ID = 8453;
-const NFPM_ADDRESS = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
-const FACTORY_ADDRESS = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD";
+const CHAIN_SEQUENCE = ["base", "bsc"];
+const BSC_CONSTANTS_PATH = "./bsc_vfat_constants.json";
+const CHAIN_CONFIGS = {
+  base: {
+    key: "base",
+    chainId: 8453,
+    chainName: "Base",
+    rpcNetwork: "base-mainnet",
+    priceNetwork: "base-mainnet",
+    standardPositionManagerAddress: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+    enableAerodromeV2Paths: true,
+    sickleFactoryAllowlist: ["0x71d234a3e1dfc161cc1d081e6496e76627baac31"],
+    vfatImplementationAllowlist: ["0xfff75d099baee29f447866bc5299cd67c04761c8"],
+    clPositionManagers: [
+      { protocol: "Aerodrome SlipStream", address: "0x827922686190790b37229fd06084350e74485b72" },
+      { protocol: "PancakeSwap V3", address: "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364" },
+      { protocol: "Uniswap V3", address: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1" }
+    ]
+  },
+  bsc: {
+    key: "bsc",
+    chainId: 56,
+    chainName: "BSC",
+    rpcNetwork: "bnb-mainnet",
+    priceNetwork: "bnb-mainnet",
+    standardPositionManagerAddress: "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364",
+    enableAerodromeV2Paths: false,
+    sickleFactoryAllowlist: [
+      "0x53d9780dbd3831e3a797fd215be4131636cd5fdf",
+      "0x71d234a3e1dfc161cc1d081e6496e76627baac31"
+    ],
+    vfatImplementationAllowlist: [
+      "0x7f4b6f10c34470ebddf5e7ab049d8dffb01f8a6f",
+      "0xfff75d099baee29f447866bc5299cd67c04761c8"
+    ],
+    clPositionManagers: [
+      { protocol: "PancakeSwap V3", address: "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364" },
+      { protocol: "Uniswap V3", address: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1" }
+    ]
+  }
+};
+let ACTIVE_CHAIN_KEY = "base";
+let CHAIN_ID = CHAIN_CONFIGS.base.chainId;
+let CHAIN_NAME = CHAIN_CONFIGS.base.chainName;
+let CHAIN_RPC_NETWORK = CHAIN_CONFIGS.base.rpcNetwork;
+let CHAIN_PRICE_NETWORK = CHAIN_CONFIGS.base.priceNetwork;
+let STANDARD_POSITION_MANAGER_ADDRESS = CHAIN_CONFIGS.base.standardPositionManagerAddress;
+let ENABLE_AERODROME_V2_PATHS = CHAIN_CONFIGS.base.enableAerodromeV2Paths;
 const AERODROME_VOTER_ADDRESS = "0x16613524e02ad97edfef371bc883f2f5d6c480a5";
 const AERODROME_V2_PAIR_FACTORY_ADDRESS = "0x420dd381b31aef6683db6b902084cb0ffece40da";
 const AERODROME_V2_PROTOCOL = "Aerodrome V2";
@@ -27,7 +72,7 @@ const GET_REWARD_BY_TOKEN_SELECTOR = "0x1c4b774b"; // getReward(uint256)
 const GET_REWARD_BY_ACCOUNT_SELECTOR = "0xc00007b0"; // getReward(address)
 const ACCOUNT_WIDE_CLAIM_SELECTORS = new Set([
   GET_REWARD_BY_ACCOUNT_SELECTOR,
-  "0xcef6d209", // observed Base blanket-claim route used by Sickle/VFat claim execution
+  "0xcef6d209", // observed blanket-claim route used by Sickle/VFat claim execution
   "0x16fbdebe" // observed claim+conversion route used by Sickle/VFat execution
 ]);
 const HARVEST_BY_TOKEN_SELECTOR = "0x18fccc76"; // harvest(uint256,address)
@@ -35,23 +80,132 @@ const PENDING_CAKE_SELECTOR = "0xce5f39c6"; // pendingCake(uint256)
 const CAKE_SELECTOR = "0x4ca6ef28"; // CAKE()
 const CAKE_LOWER_SELECTOR = "0xdce17484"; // cake()
 const PANCAKE_CAKE_TOKEN = "0x3055913c90fcc1a6ce9a358911721eeb942013a1";
-const FEE_GROWTH_GLOBAL0_SELECTOR = ethers.id("feeGrowthGlobal0X128()").slice(0, 10);
-const FEE_GROWTH_GLOBAL1_SELECTOR = ethers.id("feeGrowthGlobal1X128()").slice(0, 10);
-const TICKS_SELECTOR = ethers.id("ticks(int24)").slice(0, 10);
-const SICKLE_FACTORY_ALLOWLIST = [
-  "0x71d234a3e1dfc161cc1d081e6496e76627baac31"
+const FEE_GROWTH_GLOBAL0_SELECTOR = "0xf3058399"; // feeGrowthGlobal0X128()
+const FEE_GROWTH_GLOBAL1_SELECTOR = "0x46141319"; // feeGrowthGlobal1X128()
+const TICKS_SELECTOR = "0xf30dba93"; // ticks(int24)
+let SICKLE_FACTORY_ALLOWLIST = [
+  ...CHAIN_CONFIGS.base.sickleFactoryAllowlist
 ];
-const VFAT_IMPLEMENTATION_ALLOWLIST = new Set([
-  "0xfff75d099baee29f447866bc5299cd67c04761c8"
+let VFAT_IMPLEMENTATION_ALLOWLIST = new Set([
+  ...CHAIN_CONFIGS.base.vfatImplementationAllowlist
 ]);
-const CL_POSITION_MANAGERS = [
-  { protocol: "Aerodrome SlipStream", address: "0x827922686190790b37229fd06084350e74485b72" },
-  { protocol: "PancakeSwap V3", address: "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364" },
-  { protocol: "Uniswap V3", address: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1" }
+let CL_POSITION_MANAGERS = [
+  ...CHAIN_CONFIGS.base.clPositionManagers
 ];
-const CL_PROTOCOL_BY_MANAGER = new Map(
-  CL_POSITION_MANAGERS.map((item) => [ethers.getAddress(item.address).toLowerCase(), item.protocol])
-);
+let CL_PROTOCOL_BY_MANAGER = new Map();
+function rebuildClProtocolByManager() {
+  CL_PROTOCOL_BY_MANAGER = new Map(
+    CL_POSITION_MANAGERS.map((item) => [ethers.getAddress(item.address).toLowerCase(), item.protocol])
+  );
+}
+rebuildClProtocolByManager();
+
+function normalizeAddressList(values = []) {
+  const normalized = [];
+  for (const value of values || []) {
+    try {
+      normalized.push(ethers.getAddress(value));
+    } catch {
+      // Ignore invalid addresses in optional config payloads.
+    }
+  }
+  return [...new Set(normalized)];
+}
+
+function normalizePositionManagers(values = []) {
+  const normalized = [];
+  const seen = new Set();
+  for (const value of values || []) {
+    try {
+      const address = ethers.getAddress(value?.address || value);
+      const key = address.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const protocol = typeof value?.protocol === "string" && value.protocol.trim()
+        ? value.protocol.trim()
+        : "Unknown CL";
+      normalized.push({ protocol, address });
+    } catch {
+      // Ignore invalid manager payloads.
+    }
+  }
+  return normalized;
+}
+
+function chooseStandardManagerAddress() {
+  const pancake = CL_POSITION_MANAGERS.find((item) => item.protocol.toLowerCase().includes("pancake"));
+  if (pancake?.address) {
+    return ethers.getAddress(pancake.address);
+  }
+  if (CL_POSITION_MANAGERS[0]?.address) {
+    return ethers.getAddress(CL_POSITION_MANAGERS[0].address);
+  }
+  return ethers.getAddress(STANDARD_POSITION_MANAGER_ADDRESS);
+}
+
+async function loadChainOverrides() {
+  let bscOverrides = null;
+  try {
+    const response = await fetch(BSC_CONSTANTS_PATH, { cache: "no-store" });
+    if (!response.ok) {
+      state.chainOverridesByKey.set("bsc", null);
+      return;
+    }
+    const payload = await response.json();
+    const configuredFactories = normalizeAddressList(payload?.sickleFactoryAllowlist || []);
+    const configuredImplementations = normalizeAddressList(payload?.vfatImplementationAllowlist || []);
+    const configuredManagers = normalizePositionManagers(payload?.clPositionManagers || []);
+    bscOverrides = {
+      sickleFactoryAllowlist: configuredFactories.length ? configuredFactories : null,
+      vfatImplementationAllowlist: configuredImplementations.length ? configuredImplementations : null,
+      clPositionManagers: configuredManagers.length ? configuredManagers : null
+    };
+  } catch {
+    bscOverrides = null;
+  }
+  state.chainOverridesByKey.set("bsc", bscOverrides);
+}
+
+function resetRuntimeCaches() {
+  state.provider = null;
+  state.providerKey = "";
+  state.prices.clear();
+  state.tokens.clear();
+  state.managerFactories.clear();
+  state.poolByManagerKey.clear();
+  state.txByHash.clear();
+  state.ownerAdapterByAddress.clear();
+  state.gaugeRewardTokenByAddress.clear();
+  state.aerodromeGaugeByAddress.clear();
+  state.aerodromeV2PoolByAddress.clear();
+  state.aerodromeV2PoolFeeByAddress.clear();
+}
+
+function applyChainContext(chainKey) {
+  const baseConfig = CHAIN_CONFIGS[chainKey] || CHAIN_CONFIGS.base;
+  const overrides = state.chainOverridesByKey.get(chainKey) || null;
+
+  ACTIVE_CHAIN_KEY = baseConfig.key;
+  CHAIN_ID = baseConfig.chainId;
+  CHAIN_NAME = baseConfig.chainName;
+  CHAIN_RPC_NETWORK = baseConfig.rpcNetwork;
+  CHAIN_PRICE_NETWORK = baseConfig.priceNetwork;
+  STANDARD_POSITION_MANAGER_ADDRESS = baseConfig.standardPositionManagerAddress;
+  ENABLE_AERODROME_V2_PATHS = Boolean(baseConfig.enableAerodromeV2Paths);
+
+  const factories = normalizeAddressList(overrides?.sickleFactoryAllowlist || baseConfig.sickleFactoryAllowlist || []);
+  SICKLE_FACTORY_ALLOWLIST = factories.length ? factories : [];
+
+  const implementations = normalizeAddressList(overrides?.vfatImplementationAllowlist || baseConfig.vfatImplementationAllowlist || []);
+  VFAT_IMPLEMENTATION_ALLOWLIST = new Set(implementations.map((value) => value.toLowerCase()));
+
+  const managers = normalizePositionManagers(overrides?.clPositionManagers || baseConfig.clPositionManagers || []);
+  CL_POSITION_MANAGERS = managers;
+  rebuildClProtocolByManager();
+}
+
 const CL_PROTOCOL_ADAPTERS = {
   "Uniswap V3": {
     feesMode: "realized_plus_pending_delta",
@@ -122,10 +276,15 @@ const ERC20_ABI = [
 
 const STORAGE_KEYS = {
   wallet: "defi_scanner_wallet",
-  alchemyKey: "defi_scanner_alchemy_key"
+  alchemyKey: "defi_scanner_alchemy_key",
+  vfatContractsCache: "defi_scanner_vfat_contract_cache_v1"
 };
 const ACCOUNT_BADGE_SIZE = 56;
 const JAZZICON_MODULE_URL = "https://cdn.jsdelivr.net/npm/@metamask/jazzicon@2.0.0/+esm";
+const VFAT_CONTRACT_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const RPC_MAX_RETRIES = 3;
+const PRICE_MAX_RETRIES = 2;
+const RETRY_BASE_MS = 220;
 
 const state = {
   provider: null,
@@ -140,6 +299,7 @@ const state = {
   aerodromeGaugeByAddress: new Map(),
   aerodromeV2PoolByAddress: new Map(),
   aerodromeV2PoolFeeByAddress: new Map(),
+  chainOverridesByKey: new Map(),
   badgeAddress: "",
   jazziconFactory: null,
   jazziconFactoryPromise: null,
@@ -342,6 +502,47 @@ function persistCredentials(wallet, apiKey) {
   }
 }
 
+function getVfatCacheStorageKey() {
+  return `${STORAGE_KEYS.vfatContractsCache}:${ACTIVE_CHAIN_KEY}`;
+}
+
+function readCachedVfatContracts(wallet) {
+  try {
+    const owner = ethers.getAddress(wallet).toLowerCase();
+    const raw = localStorage.getItem(getVfatCacheStorageKey());
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    const entry = parsed?.[owner];
+    if (!entry || !Array.isArray(entry.addresses) || !Number.isFinite(entry.updatedAt)) {
+      return null;
+    }
+    if ((Date.now() - entry.updatedAt) > VFAT_CONTRACT_CACHE_TTL_MS) {
+      return null;
+    }
+    return normalizeAddressList(entry.addresses);
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedVfatContracts(wallet, addresses) {
+  try {
+    const owner = ethers.getAddress(wallet).toLowerCase();
+    const normalizedAddresses = normalizeAddressList(addresses);
+    const raw = localStorage.getItem(getVfatCacheStorageKey());
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[owner] = {
+      updatedAt: Date.now(),
+      addresses: normalizedAddresses
+    };
+    localStorage.setItem(getVfatCacheStorageKey(), JSON.stringify(parsed));
+  } catch {
+    // Ignore localStorage access errors.
+  }
+}
+
 function syncCredentialBanner() {
   const hasWallet = Boolean(els.walletInput.value.trim());
   const hasApiKey = Boolean(els.alchemyInput.value.trim());
@@ -362,37 +563,75 @@ function closeSettings() {
   els.settingsOverlay.setAttribute("aria-hidden", "true");
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableHttpStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function isRetryableRpcPayloadError(errorPayload) {
+  const code = Number(errorPayload?.code);
+  const message = String(errorPayload?.message || "");
+  if (code === -32005 || code === -32603 || code === -32000) {
+    return true;
+  }
+  return /rate|limit|too many|timeout|temporar|busy|capacity|unavailable|gateway/i.test(message);
+}
+
 function getProvider(apiKey) {
-  if (!state.provider || state.providerKey !== apiKey) {
-    state.provider = new ethers.JsonRpcProvider(`https://base-mainnet.g.alchemy.com/v2/${apiKey}`, BASE_CHAIN_ID, {
+  const providerKey = `${ACTIVE_CHAIN_KEY}:${apiKey}`;
+  if (!state.provider || state.providerKey !== providerKey) {
+    state.provider = new ethers.JsonRpcProvider(`https://${CHAIN_RPC_NETWORK}.g.alchemy.com/v2/${apiKey}`, CHAIN_ID, {
       staticNetwork: true
     });
-    state.providerKey = apiKey;
+    state.providerKey = providerKey;
   }
   return state.provider;
 }
 
 async function rpcCall(apiKey, method, params) {
-  const response = await fetch(`https://base-mainnet.g.alchemy.com/v2/${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method,
-      params
-    })
-  });
+  let lastError = null;
+  for (let attempt = 0; attempt <= RPC_MAX_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(`https://${CHAIN_RPC_NETWORK}.g.alchemy.com/v2/${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: attempt + 1,
+          method,
+          params
+        })
+      });
 
-  if (!response.ok) {
-    throw new Error(`RPC request failed (${response.status})`);
-  }
+      if (!response.ok) {
+        if (attempt < RPC_MAX_RETRIES && isRetryableHttpStatus(response.status)) {
+          await delay(RETRY_BASE_MS * (attempt + 1));
+          continue;
+        }
+        throw new Error(`RPC request failed (${response.status})`);
+      }
 
-  const payload = await response.json();
-  if (payload.error) {
-    throw new Error(payload.error.message || `RPC error for ${method}`);
+      const payload = await response.json();
+      if (payload.error) {
+        if (attempt < RPC_MAX_RETRIES && isRetryableRpcPayloadError(payload.error)) {
+          await delay(RETRY_BASE_MS * (attempt + 1));
+          continue;
+        }
+        throw new Error(payload.error.message || `RPC error for ${method}`);
+      }
+      return payload.result;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= RPC_MAX_RETRIES) {
+        break;
+      }
+      await delay(RETRY_BASE_MS * (attempt + 1));
+    }
   }
-  return payload.result;
+  throw lastError || new Error(`RPC error for ${method}`);
 }
 
 function parseEip1167Implementation(codeHex) {
@@ -540,6 +779,8 @@ async function findFactoryDeployedContracts(wallet, apiKey) {
 
 async function identifyVFatContracts(deployedContracts, provider) {
   const classified = [];
+  const fallbackCandidates = [];
+  const strictAllowlist = new Set([...VFAT_IMPLEMENTATION_ALLOWLIST].map((value) => value.toLowerCase()));
 
   for (const contractAddress of deployedContracts) {
     try {
@@ -548,20 +789,40 @@ async function identifyVFatContracts(deployedContracts, provider) {
       if (!implementation) {
         continue;
       }
-      if (!VFAT_IMPLEMENTATION_ALLOWLIST.has(implementation.toLowerCase())) {
+      const normalizedContract = ethers.getAddress(contractAddress);
+      const normalizedImplementation = ethers.getAddress(implementation);
+      const row = {
+        address: normalizedContract,
+        implementation: normalizedImplementation,
+        kind: "eip1167"
+      };
+
+      if (!strictAllowlist.size || strictAllowlist.has(normalizedImplementation.toLowerCase())) {
+        classified.push(row);
         continue;
       }
-      classified.push({
-        address: ethers.getAddress(contractAddress),
-        implementation: ethers.getAddress(implementation),
-        kind: "eip1167"
+      fallbackCandidates.push({
+        ...row,
+        kind: "eip1167_fallback"
       });
     } catch {
       // Ignore code fetch failures and continue with the rest.
     }
   }
 
-  return classified;
+  if (classified.length) {
+    return classified;
+  }
+  // Fallback for stale allowlists: downstream ERC-721 + live-liquidity checks still gate validity.
+  return fallbackCandidates;
+}
+
+function buildVfatContractHealthNote(vfatContracts) {
+  const fallbackCount = (vfatContracts || []).filter((item) => item?.kind === "eip1167_fallback").length;
+  if (!fallbackCount) {
+    return "";
+  }
+  return `${fallbackCount} VFat contract${fallbackCount === 1 ? "" : "s"} matched fallback clone detection because constants allowlist did not match.`;
 }
 
 function normalizeAddressOrZero(value) {
@@ -1423,6 +1684,9 @@ function normalizeNullableAddress(value) {
 }
 
 async function isAerodromeGauge(address, provider) {
+  if (!ENABLE_AERODROME_V2_PATHS) {
+    return false;
+  }
   const gauge = ethers.getAddress(address);
   const key = gauge.toLowerCase();
   if (state.aerodromeGaugeByAddress.has(key)) {
@@ -1441,6 +1705,9 @@ async function isAerodromeGauge(address, provider) {
 }
 
 async function isAerodromeV2Pool(poolAddress, provider) {
+  if (!ENABLE_AERODROME_V2_PATHS) {
+    return false;
+  }
   const pool = ethers.getAddress(poolAddress);
   const key = pool.toLowerCase();
   if (state.aerodromeV2PoolByAddress.has(key)) {
@@ -1458,6 +1725,9 @@ async function isAerodromeV2Pool(poolAddress, provider) {
 }
 
 async function resolveAerodromeV2PoolFee(poolAddress, stable, provider) {
+  if (!ENABLE_AERODROME_V2_PATHS) {
+    return null;
+  }
   const pool = ethers.getAddress(poolAddress);
   const key = `${pool.toLowerCase()}:${stable ? "1" : "0"}`;
   if (state.aerodromeV2PoolFeeByAddress.has(key)) {
@@ -1707,6 +1977,9 @@ async function buildAerodromeV2Row(vfatContract, gaugeAddress, blockWindow, apiK
 }
 
 async function fetchVFatAerodromeV2Rows(vfatContracts, apiKey, provider, onStatus = () => {}) {
+  if (!ENABLE_AERODROME_V2_PATHS) {
+    return [];
+  }
   if (!vfatContracts?.length) {
     return [];
   }
@@ -2190,12 +2463,20 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
     metricsReason: "partial_call_failed"
   };
 
-  const snapshotNow = await fetchClaimableSnapshotAtBlock(row, "latest", apiKey, provider);
+  let snapshotNow = await fetchClaimableSnapshotAtBlock(row, "latest", apiKey, provider);
+  if (!snapshotNow) {
+    await delay(RETRY_BASE_MS);
+    snapshotNow = await fetchClaimableSnapshotAtBlock(row, "latest", apiKey, provider);
+  }
   if (!snapshotNow) {
     return { ...row, ...defaults };
   }
 
-  const snapshot24h = await fetchClaimableSnapshotAtBlock(row, blockWindow.fromBlockTag, apiKey, provider);
+  let snapshot24h = await fetchClaimableSnapshotAtBlock(row, blockWindow.fromBlockTag, apiKey, provider);
+  if (!snapshot24h) {
+    await delay(RETRY_BASE_MS);
+    snapshot24h = await fetchClaimableSnapshotAtBlock(row, blockWindow.fromBlockTag, apiKey, provider);
+  }
   const collect24h = await fetchCollectAmounts24h(row, apiKey, blockWindow);
 
   const pendingNow0 = snapshotNow.claimable?.amount0 || 0n;
@@ -2412,13 +2693,31 @@ async function buildCurrentOwnedRows(historyRows, apiKey, provider, onStatus = (
 }
 
 async function fetchVFatClDataForWallet(wallet, apiKey, provider, onStatus = () => {}) {
-  onStatus("Discovering direct deployments on Base for VFat extraction...");
-  const directDeployedContracts = await findDirectlyDeployedContracts(wallet, apiKey);
-  onStatus("Checking known Sickle factory deployments on Base...");
-  const factoryDeployedContracts = await findFactoryDeployedContracts(wallet, apiKey);
-  const deployedContracts = [...new Set([...directDeployedContracts, ...factoryDeployedContracts])];
-  onStatus("Identifying VFat contracts from discovered deployments...");
-  const identifiedVfatContracts = await identifyVFatContracts(deployedContracts, provider);
+  let directDeployedContracts = [];
+  let factoryDeployedContracts = [];
+  let deployedContracts = [];
+  let identifiedVfatContracts = [];
+  let usedCachedVfatContracts = false;
+  const cachedVfatContracts = readCachedVfatContracts(wallet);
+
+  if (cachedVfatContracts !== null) {
+    usedCachedVfatContracts = true;
+    onStatus(`Using cached VFat contract set for ${CHAIN_NAME} to reduce RPC load (${cachedVfatContracts.length} contracts)...`);
+    identifiedVfatContracts = cachedVfatContracts.map((address) => ({
+      address,
+      implementation: null,
+      kind: "cache"
+    }));
+  } else {
+    onStatus(`Discovering direct deployments on ${CHAIN_NAME} for VFat extraction...`);
+    directDeployedContracts = await findDirectlyDeployedContracts(wallet, apiKey);
+    onStatus(`Checking known Sickle factory deployments on ${CHAIN_NAME}...`);
+    factoryDeployedContracts = await findFactoryDeployedContracts(wallet, apiKey);
+    deployedContracts = [...new Set([...directDeployedContracts, ...factoryDeployedContracts])];
+    onStatus("Identifying VFat contracts from discovered deployments...");
+    identifiedVfatContracts = await identifyVFatContracts(deployedContracts, provider);
+    writeCachedVfatContracts(wallet, identifiedVfatContracts.map((item) => item.address));
+  }
   const vfatClHistoryRows = [];
 
   for (const vfatContract of identifiedVfatContracts) {
@@ -2427,11 +2726,26 @@ async function fetchVFatClDataForWallet(wallet, apiKey, provider, onStatus = () 
     vfatClHistoryRows.push(...rows);
   }
 
+  if (usedCachedVfatContracts && cachedVfatContracts?.length && !vfatClHistoryRows.length) {
+    onStatus(`No CL history found for cached VFat contracts. Re-running ${CHAIN_NAME} deployment discovery...`);
+    directDeployedContracts = await findDirectlyDeployedContracts(wallet, apiKey);
+    factoryDeployedContracts = await findFactoryDeployedContracts(wallet, apiKey);
+    deployedContracts = [...new Set([...directDeployedContracts, ...factoryDeployedContracts])];
+    identifiedVfatContracts = await identifyVFatContracts(deployedContracts, provider);
+    writeCachedVfatContracts(wallet, identifiedVfatContracts.map((item) => item.address));
+    for (const vfatContract of identifiedVfatContracts) {
+      onStatus(`Fetching CL transfer history for ${shortenAddress(vfatContract.address)}...`);
+      const rows = await fetchClTransfersForVfatContract(vfatContract.address, apiKey);
+      vfatClHistoryRows.push(...rows);
+    }
+  }
+
   const currentOwnedRows = await buildCurrentOwnedRows(vfatClHistoryRows, apiKey, provider, onStatus);
   onStatus("Computing 24h fees, emissions, and APR for active CL positions...");
   const vfatClCurrentRows = await enrichCurrentRowsWith24hMetrics(currentOwnedRows, apiKey, provider, onStatus);
-  onStatus("Discovering Aerodrome V2 gauge-staked LP positions for VFat contracts...");
-  const vfatV2CurrentRows = await fetchVFatAerodromeV2Rows(identifiedVfatContracts, apiKey, provider, onStatus);
+  const vfatV2CurrentRows = ENABLE_AERODROME_V2_PATHS
+    ? await fetchVFatAerodromeV2Rows(identifiedVfatContracts, apiKey, provider, onStatus)
+    : [];
   const vfatClCurrentTokenCount = vfatClCurrentRows.length;
   const vfatV2CurrentTokenCount = vfatV2CurrentRows.length;
   const vfatClOwnedByVfatCount = vfatClCurrentRows.filter((row) => row.ownerScope === "vfat").length;
@@ -2696,22 +3010,47 @@ async function getTokenMeta(address, provider) {
 async function getPrices(addresses, apiKey) {
   const missing = addresses.filter((address) => !state.prices.has(address));
   if (missing.length) {
-    const response = await fetch(`${PRICE_API_BASE}/${apiKey}/tokens/by-address`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        addresses: missing.map((address) => ({
-          network: "base-mainnet",
-          address
-        }))
-      })
-    });
+    let payload = null;
+    let resolved = false;
+    let lastError = null;
 
-    if (!response.ok) {
-      throw new Error(`Price lookup failed (${response.status})`);
+    for (let attempt = 0; attempt <= PRICE_MAX_RETRIES; attempt += 1) {
+      try {
+        const response = await fetch(`${PRICE_API_BASE}/${apiKey}/tokens/by-address`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            addresses: missing.map((address) => ({
+              network: CHAIN_PRICE_NETWORK,
+              address
+            }))
+          })
+        });
+
+        if (!response.ok) {
+          if (attempt < PRICE_MAX_RETRIES && isRetryableHttpStatus(response.status)) {
+            await delay(RETRY_BASE_MS * (attempt + 1));
+            continue;
+          }
+          throw new Error(`Price lookup failed (${response.status})`);
+        }
+
+        payload = await response.json();
+        resolved = true;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= PRICE_MAX_RETRIES) {
+          break;
+        }
+        await delay(RETRY_BASE_MS * (attempt + 1));
+      }
     }
 
-    const payload = await response.json();
+    if (!resolved) {
+      throw lastError || new Error("Price lookup failed.");
+    }
+
     for (const item of payload.data || []) {
       const price = item.prices?.find((entry) => entry.currency === "usd")?.value;
       state.prices.set(ethers.getAddress(item.address), price ? Number(price) : null);
@@ -2830,18 +3169,24 @@ function getClaimableAmounts(position, poolState) {
   return { amount0: pending0, amount1: pending1 };
 }
 
-async function fetchPosition(tokenId, provider) {
-  const manager = new ethers.Contract(NFPM_ADDRESS, NFPM_ABI, provider);
-  const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
+async function fetchPosition(tokenId, managerAddress, provider) {
+  const normalizedManager = ethers.getAddress(managerAddress);
+  const manager = new ethers.Contract(normalizedManager, NFPM_ABI, provider);
   const position = await manager.positions(tokenId);
 
-  const [token0Meta, token1Meta, poolAddress] = await Promise.all([
+  const [token0Meta, token1Meta] = await Promise.all([
     getTokenMeta(position.token0, provider),
-    getTokenMeta(position.token1, provider),
-    factory.getPool(position.token0, position.token1, position.fee)
+    getTokenMeta(position.token1, provider)
   ]);
+  const poolAddress = await resolvePoolAddressForManager(
+    normalizedManager,
+    position.token0,
+    position.token1,
+    Number(position.fee),
+    provider
+  );
 
-  if (poolAddress === ZeroAddress) {
+  if (!poolAddress || poolAddress === ZeroAddress) {
     throw new Error(`No pool found for token ${tokenId.toString()}`);
   }
 
@@ -2875,6 +3220,7 @@ async function fetchPosition(tokenId, provider) {
 
   return {
     tokenId,
+    managerAddress: normalizedManager,
     poolAddress,
     position,
     currentTick,
@@ -2923,17 +3269,18 @@ function normalizePositionIdentityKey(tokenContract, tokenIdHex) {
 }
 
 function normalizeStandardOpenPositionRow(position, owner) {
-  const protocol = CL_PROTOCOL_BY_MANAGER.get(NFPM_ADDRESS.toLowerCase()) || "Uniswap V3";
+  const managerAddress = ethers.getAddress(position.managerAddress || chooseStandardManagerAddress());
+  const protocol = CL_PROTOCOL_BY_MANAGER.get(managerAddress.toLowerCase()) || "PancakeSwap V3";
   const tokenIdHex = normalizeTokenIdHex(`0x${BigInt(position.tokenId).toString(16)}`);
   return {
     source: "standard",
     positionType: "cl",
     protocol,
     protocolDisplay: protocol,
-    tokenContract: ethers.getAddress(NFPM_ADDRESS),
+    tokenContract: managerAddress,
     tokenIdHex,
     tokenIdDecimal: position.tokenId.toString(),
-    tokenKey: `wallet:${NFPM_ADDRESS.toLowerCase()}:${tokenIdHex.toLowerCase()}`,
+    tokenKey: `wallet:${managerAddress.toLowerCase()}:${tokenIdHex.toLowerCase()}`,
     vfatContract: owner,
     currentOwner: owner,
     ownerScope: "external",
@@ -3015,7 +3362,7 @@ function buildUnifiedSummaryTotals(openRows) {
       }
     }
     if (row.poolPair) {
-      uniquePools.add(`${row.protocol || "unknown"}:${row.poolPair}:${Number.isFinite(row.poolFee) ? row.poolFee : "na"}`);
+      uniquePools.add(`${row.chainKey || ACTIVE_CHAIN_KEY}:${row.protocol || "unknown"}:${row.poolPair}:${Number.isFinite(row.poolFee) ? row.poolFee : "na"}`);
     }
   }
 
@@ -3033,25 +3380,46 @@ function buildUnifiedSummaryTotals(openRows) {
   };
 }
 
-async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
+async function fetchPortfolioSingleChain(wallet, apiKey, onStatus = () => {}) {
   const provider = getProvider(apiKey);
   const owner = ethers.getAddress(wallet);
-  const manager = new ethers.Contract(NFPM_ADDRESS, NFPM_ABI, provider);
-  onStatus("Fetching position NFTs from Uniswap v3 on Base...");
-  const balance = Number(await manager.balanceOf(owner));
-  const ids = await Promise.all(
-    Array.from({ length: balance }, (_, index) => manager.tokenOfOwnerByIndex(owner, index))
-  );
+  const configuredManagers = normalizePositionManagers(CL_POSITION_MANAGERS);
+  const managerAddresses = configuredManagers.length
+    ? configuredManagers.map((item) => ethers.getAddress(item.address))
+    : [chooseStandardManagerAddress()];
+  onStatus(`Fetching wallet-held position NFTs from ${managerAddresses.length} manager${managerAddresses.length === 1 ? "" : "s"} on ${CHAIN_NAME}...`);
 
-  const rawPositions = await Promise.all(ids.map((tokenId) => fetchPosition(tokenId, provider)));
+  const tokenRefs = [];
+  for (const managerAddress of managerAddresses) {
+    const manager = new ethers.Contract(managerAddress, NFPM_ABI, provider);
+    let balance = 0;
+    try {
+      balance = Number(await manager.balanceOf(owner));
+    } catch {
+      continue;
+    }
+    if (!Number.isFinite(balance) || balance <= 0) {
+      continue;
+    }
+    const ids = await Promise.all(
+      Array.from({ length: balance }, (_, index) => manager.tokenOfOwnerByIndex(owner, index))
+    );
+    for (const tokenId of ids) {
+      tokenRefs.push({ tokenId, managerAddress });
+    }
+  }
+
+  const throttledReads = await fetchPositionsThrottled(tokenRefs, provider, onStatus);
+  const rawPositions = throttledReads.positions;
+  const walletPositionReadFailures = throttledReads.failures;
   const uniqueAddresses = [...new Set(rawPositions.flatMap((item) => [item.token0.address, item.token1.address]))];
   const prices = await getPrices(uniqueAddresses, apiKey);
   const positions = rawPositions.map((item) => enrichValues(item, prices));
   const standardOpenPositions = positions.filter((item) => item.liquidity > 0n);
-  const standardRowsBase = standardOpenPositions.map((position) => normalizeStandardOpenPositionRow(position, owner));
+  const standardRowsCurrent = standardOpenPositions.map((position) => normalizeStandardOpenPositionRow(position, owner));
 
   onStatus("Computing 24h fees, emissions, and APR for wallet-held CL positions...");
-  const standardRowsEnriched = await enrichCurrentRowsWith24hMetrics(standardRowsBase, apiKey, provider, onStatus);
+  const standardRowsEnriched = await enrichCurrentRowsWith24hMetrics(standardRowsCurrent, apiKey, provider, onStatus);
 
   const vfatData = {
     vfatContracts: [],
@@ -3064,6 +3432,9 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
     vfatClUncertainCount: 0,
     vfatClError: ""
   };
+  if (walletPositionReadFailures > 0) {
+    vfatData.vfatClError = `${walletPositionReadFailures} wallet-held NFT read${walletPositionReadFailures === 1 ? "" : "s"} failed and were skipped on ${CHAIN_NAME} (wallet scan warning, VFat scan still runs).`;
+  }
 
   try {
     const fetchedVfat = await fetchVFatClDataForWallet(owner, apiKey, provider, onStatus);
@@ -3075,8 +3446,17 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
     vfatData.vfatClOwnedByVfatCount = fetchedVfat.vfatClOwnedByVfatCount;
     vfatData.vfatClExternalizedCount = fetchedVfat.vfatClExternalizedCount;
     vfatData.vfatClUncertainCount = fetchedVfat.vfatClUncertainCount;
+    const fallbackNote = buildVfatContractHealthNote(fetchedVfat.vfatContracts);
+    if (fallbackNote) {
+      vfatData.vfatClError = vfatData.vfatClError
+        ? `${vfatData.vfatClError} | ${fallbackNote}`
+        : fallbackNote;
+    }
   } catch (error) {
-    vfatData.vfatClError = error?.message || "Failed to fetch VFat position data.";
+    const vfatError = error?.message || "Failed to fetch VFat position data.";
+    vfatData.vfatClError = vfatData.vfatClError
+      ? `${vfatData.vfatClError} | ${vfatError}`
+      : vfatError;
   }
 
   const standardRows = annotateProtocolDisplay(standardRowsEnriched, { isVfat: false });
@@ -3088,8 +3468,14 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
   const unifiedTotals = buildUnifiedSummaryTotals(mergedOpen.openRows);
 
   return {
+    chainKey: ACTIVE_CHAIN_KEY,
+    chainName: CHAIN_NAME,
     owner,
-    openRows: mergedOpen.openRows,
+    openRows: mergedOpen.openRows.map((row) => ({
+      ...row,
+      chainKey: ACTIVE_CHAIN_KEY,
+      chainName: CHAIN_NAME
+    })),
     openRowsDedupeCount: mergedOpen.dedupeCount,
     vfatContracts: vfatData.vfatContracts,
     vfatClCurrentRows: vfatData.vfatClCurrentRows,
@@ -3113,12 +3499,114 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
   };
 }
 
+function mergeChainErrors(chainErrors) {
+  return chainErrors
+    .map((item) => `${item.chainName}: ${item.message}`)
+    .join(" | ");
+}
+
+async function fetchPositionsThrottled(tokenRefs, provider, onStatus = () => {}) {
+  const positions = [];
+  let failures = 0;
+  const batchSize = 2;
+
+  for (let i = 0; i < tokenRefs.length; i += batchSize) {
+    const batch = tokenRefs.slice(i, i + batchSize);
+    const settled = await Promise.allSettled(
+      batch.map((item) => fetchPosition(item.tokenId, item.managerAddress, provider))
+    );
+    for (const result of settled) {
+      if (result.status === "fulfilled") {
+        positions.push(result.value);
+      } else {
+        failures += 1;
+      }
+    }
+    if (i + batchSize < tokenRefs.length) {
+      onStatus(`Throttling ${CHAIN_NAME} wallet-held reads (${Math.min(i + batchSize, tokenRefs.length)}/${tokenRefs.length})...`);
+      await delay(160);
+    }
+  }
+
+  return { positions, failures };
+}
+
+async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
+  const owner = ethers.getAddress(wallet);
+  const chainPortfolios = [];
+  const chainErrors = [];
+
+  for (const chainKey of CHAIN_SEQUENCE) {
+    const config = CHAIN_CONFIGS[chainKey];
+    if (!config) {
+      continue;
+    }
+    applyChainContext(chainKey);
+    resetRuntimeCaches();
+    try {
+      onStatus(`Loading ${CHAIN_NAME} positions...`);
+      const scopedStatus = (message) => onStatus(`[${CHAIN_NAME}] ${message}`);
+      const portfolio = await fetchPortfolioSingleChain(wallet, apiKey, scopedStatus);
+      chainPortfolios.push(portfolio);
+    } catch (error) {
+      chainErrors.push({
+        chainKey,
+        chainName: config.chainName,
+        message: error?.message || "Failed to load chain data."
+      });
+    }
+  }
+
+  if (!chainPortfolios.length) {
+    throw new Error(chainErrors.length ? mergeChainErrors(chainErrors) : "Failed to load portfolio data.");
+  }
+
+  const openRows = chainPortfolios
+    .flatMap((item) => item.openRows || [])
+    .sort((a, b) => {
+      const aUsd = Number.isFinite(a.currentPoolUsd) ? a.currentPoolUsd : -Infinity;
+      const bUsd = Number.isFinite(b.currentPoolUsd) ? b.currentPoolUsd : -Infinity;
+      return bUsd - aUsd;
+    });
+  const unifiedTotals = buildUnifiedSummaryTotals(openRows);
+  const mergedVfatErrorParts = [
+    ...chainPortfolios.map((item) => item.vfatClError).filter(Boolean),
+    ...(chainErrors.length ? [mergeChainErrors(chainErrors)] : [])
+  ];
+
+  return {
+    owner,
+    openRows,
+    openRowsDedupeCount: chainPortfolios.reduce((sum, item) => sum + (item.openRowsDedupeCount || 0), 0),
+    vfatContracts: chainPortfolios.flatMap((item) => item.vfatContracts || []),
+    vfatClCurrentRows: chainPortfolios.flatMap((item) => item.vfatClCurrentRows || []),
+    vfatV2CurrentRows: chainPortfolios.flatMap((item) => item.vfatV2CurrentRows || []),
+    vfatClCurrentTokenCount: chainPortfolios.reduce((sum, item) => sum + (item.vfatClCurrentTokenCount || 0), 0),
+    vfatV2CurrentTokenCount: chainPortfolios.reduce((sum, item) => sum + (item.vfatV2CurrentTokenCount || 0), 0),
+    vfatCurrentTokenCount: chainPortfolios.reduce((sum, item) => sum + (item.vfatCurrentTokenCount || 0), 0),
+    vfatClOwnedByVfatCount: chainPortfolios.reduce((sum, item) => sum + (item.vfatClOwnedByVfatCount || 0), 0),
+    vfatClExternalizedCount: chainPortfolios.reduce((sum, item) => sum + (item.vfatClExternalizedCount || 0), 0),
+    vfatClUncertainCount: chainPortfolios.reduce((sum, item) => sum + (item.vfatClUncertainCount || 0), 0),
+    vfatClError: mergedVfatErrorParts.join(" | "),
+    chainsLoaded: chainPortfolios.map((item) => item.chainName).filter(Boolean),
+    totals: {
+      pooledUsd: unifiedTotals.pooledUsd,
+      claimableUsd: unifiedTotals.claimableUsd,
+      openCount: unifiedTotals.openCount,
+      poolCount: unifiedTotals.poolCount,
+      inRangeCount: unifiedTotals.inRangeCount,
+      rangeConsideredCount: unifiedTotals.rangeConsideredCount,
+      rangeExcludedCount: unifiedTotals.rangeExcludedCount
+    }
+  };
+}
+
 function renderSummary(portfolio) {
   const { owner, openRows, totals } = portfolio;
   const outOfRange = Math.max(0, totals.rangeConsideredCount - totals.inRangeCount);
   renderAccountBadge(owner);
   els.walletHeadline.textContent = shortenAddress(owner);
-  els.walletSubline.textContent = `${totals.openCount} active position${totals.openCount === 1 ? "" : "s"} on Base`;
+  els.walletSubline.textContent = `${totals.openCount} active position${totals.openCount === 1 ? "" : "s"} on Base + BSC`;
   els.totalValue.textContent = formatUsd(totals.pooledUsd);
   els.totalClaimable.textContent = formatUsd(totals.claimableUsd);
   if (els.openCount) {
@@ -3136,7 +3624,7 @@ function renderSummary(portfolio) {
     const exclusionNote = totals.rangeExcludedCount > 0 ? ` (${totals.rangeExcludedCount} excluded)` : "";
     setStatus(`${totals.inRangeCount} in range, ${outOfRange} out of range${exclusionNote}.`, "success");
   } else {
-    setStatus("No active Base LP positions found.");
+    setStatus("No active Base + BSC LP positions found.");
   }
 }
 
@@ -3271,7 +3759,10 @@ function renderCurrentClRow(row) {
   const qualityFlagClass = qualityIsFull ? "cl-flag--full" : "cl-flag--partial";
   const qualityFlagLabel = qualityIsFull ? "full data" : "partial data";
   const safeQualityDetail = escapeHtml(quality.detail || "incomplete metrics");
-  const safeProtocol = escapeHtml(row.protocolDisplay || row.protocol);
+  const protocolLabel = row.chainName
+    ? `${row.chainName} · ${row.protocolDisplay || row.protocol}`
+    : (row.protocolDisplay || row.protocol);
+  const safeProtocol = escapeHtml(protocolLabel);
   const safePoolPair = escapeHtml(row.poolPair || "Unknown/Unknown");
   const safeFee = Number.isFinite(row.poolFee) ? escapeHtml(formatFeeTier(row.poolFee)) : "n/a";
   const rangeCurrentDisplay = buildRangeCurrentDisplay(row);
@@ -3381,7 +3872,7 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
 
   let didRender = false;
   try {
-    setBusy(true, "Reading Base contracts...");
+    setBusy(true, "Reading Base + BSC contracts...");
     const portfolio = await fetchPortfolio(wallet, apiKey, (message) => setStatus(message));
     renderSummary(portfolio);
     renderOpenSectionDiagnostics(portfolio);
@@ -3407,10 +3898,12 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
 }
 
 async function boot() {
+  await loadChainOverrides();
+  applyChainContext("base");
   clearDashboard();
   loadPersistedCredentials();
   syncCredentialBanner();
-  setStatus("Loading positions...");
+  setStatus("Loading Base + BSC positions...");
   await runLookup({ openSettingsOnMissing: true });
 }
 
