@@ -3,6 +3,9 @@ const { ethers } = window;
 const BASE_CHAIN_ID = 8453;
 const NFPM_ADDRESS = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 const FACTORY_ADDRESS = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD";
+const AERODROME_VOTER_ADDRESS = "0x16613524e02ad97edfef371bc883f2f5d6c480a5";
+const AERODROME_V2_PAIR_FACTORY_ADDRESS = "0x420dd381b31aef6683db6b902084cb0ffece40da";
+const AERODROME_V2_PROTOCOL = "Aerodrome V2";
 const Q96 = 2n ** 96n;
 const Q128 = 2n ** 128n;
 const MaxUint256 = (2n ** 256n) - 1n;
@@ -80,6 +83,28 @@ const FACTORY_INT24_ABI = [
 const POSITION_MANAGER_ABI = [
   "function factory() view returns (address)"
 ];
+const AERODROME_VOTER_ABI = [
+  "function isGauge(address target) view returns (bool)"
+];
+const AERODROME_V2_GAUGE_ABI = [
+  "function balanceOf(address account) view returns (uint256)",
+  "function stakingToken() view returns (address)",
+  "function rewardToken() view returns (address)",
+  "function earned(address account) view returns (uint256)"
+];
+const AERODROME_V2_POOL_ABI = [
+  "function metadata() view returns (uint256 dec0, uint256 dec1, uint256 r0, uint256 r1, bool st, address t0, address t1)",
+  "function totalSupply() view returns (uint256)",
+  "function reserve0() view returns (uint256)",
+  "function reserve1() view returns (uint256)",
+  "function token0() view returns (address)",
+  "function token1() view returns (address)",
+  "function stable() view returns (bool)"
+];
+const AERODROME_V2_FACTORY_ABI = [
+  "function isPool(address pool) view returns (bool)",
+  "function getFee(address pool, bool stable) view returns (uint256)"
+];
 
 const POOL_ABI = [
   "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
@@ -90,7 +115,9 @@ const POOL_ABI = [
 
 const ERC20_ABI = [
   "function symbol() view returns (string)",
-  "function decimals() view returns (uint8)"
+  "function decimals() view returns (uint8)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function totalSupply() view returns (uint256)"
 ];
 
 const STORAGE_KEYS = {
@@ -110,6 +137,9 @@ const state = {
   txByHash: new Map(),
   ownerAdapterByAddress: new Map(),
   gaugeRewardTokenByAddress: new Map(),
+  aerodromeGaugeByAddress: new Map(),
+  aerodromeV2PoolByAddress: new Map(),
+  aerodromeV2PoolFeeByAddress: new Map(),
   badgeAddress: "",
   jazziconFactory: null,
   jazziconFactoryPromise: null,
@@ -663,6 +693,18 @@ function parseTxSelector(inputData) {
   return inputData.slice(0, 10).toLowerCase();
 }
 
+function isExecutionRevertedNaError(error) {
+  const message = String(error?.message || "");
+  return /execution reverted:\s*NA/i.test(message);
+}
+
+function isRecentPositionActivityWithinWindow(row, blockWindow) {
+  return Number.isFinite(row?.blockNumber)
+    && row.blockNumber > 0
+    && Number.isFinite(blockWindow?.fromBlock)
+    && row.blockNumber >= blockWindow.fromBlock;
+}
+
 async function ethCallAtBlock(apiKey, to, data, blockTag = "latest") {
   return rpcCall(apiKey, "eth_call", [{ to, data }, toBlockTag(blockTag)]);
 }
@@ -801,6 +843,7 @@ function mapClTransferRow(vfatContract, transfer) {
   const counterparty = direction === "out" ? to : direction === "in" ? from : vfatAddress;
 
   return {
+    positionType: "cl",
     vfatContract: vfatAddress,
     tokenContract,
     tokenContractLower,
@@ -1336,8 +1379,8 @@ async function fetchErc20TransfersInWindow(apiKey, {
   fromAddress,
   toAddress,
   contractAddresses,
-  fromBlockTag,
-  toBlockTag
+  fromBlockTag = "0x0",
+  toBlockTag = "latest"
 }) {
   const transfers = [];
   let pageKey;
@@ -1347,9 +1390,11 @@ async function fetchErc20TransfersInWindow(apiKey, {
       toBlock: toBlockTag,
       excludeZeroValue: false,
       category: ["erc20"],
-      contractAddresses,
       maxCount: "0x3e8"
     };
+    if (Array.isArray(contractAddresses) && contractAddresses.length) {
+      params.contractAddresses = contractAddresses;
+    }
     if (fromAddress) {
       params.fromAddress = fromAddress;
     }
@@ -1364,6 +1409,340 @@ async function fetchErc20TransfersInWindow(apiKey, {
     pageKey = result?.pageKey;
   } while (pageKey);
   return transfers;
+}
+
+function normalizeNullableAddress(value) {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+  try {
+    return ethers.getAddress(value);
+  } catch {
+    return null;
+  }
+}
+
+async function isAerodromeGauge(address, provider) {
+  const gauge = ethers.getAddress(address);
+  const key = gauge.toLowerCase();
+  if (state.aerodromeGaugeByAddress.has(key)) {
+    return state.aerodromeGaugeByAddress.get(key);
+  }
+  try {
+    const voter = new ethers.Contract(AERODROME_VOTER_ADDRESS, AERODROME_VOTER_ABI, provider);
+    const result = await voter.isGauge(gauge);
+    const normalized = Boolean(result);
+    state.aerodromeGaugeByAddress.set(key, normalized);
+    return normalized;
+  } catch {
+    state.aerodromeGaugeByAddress.set(key, false);
+    return false;
+  }
+}
+
+async function isAerodromeV2Pool(poolAddress, provider) {
+  const pool = ethers.getAddress(poolAddress);
+  const key = pool.toLowerCase();
+  if (state.aerodromeV2PoolByAddress.has(key)) {
+    return state.aerodromeV2PoolByAddress.get(key);
+  }
+  try {
+    const factory = new ethers.Contract(AERODROME_V2_PAIR_FACTORY_ADDRESS, AERODROME_V2_FACTORY_ABI, provider);
+    const isPool = Boolean(await factory.isPool(pool));
+    state.aerodromeV2PoolByAddress.set(key, isPool);
+    return isPool;
+  } catch {
+    state.aerodromeV2PoolByAddress.set(key, false);
+    return false;
+  }
+}
+
+async function resolveAerodromeV2PoolFee(poolAddress, stable, provider) {
+  const pool = ethers.getAddress(poolAddress);
+  const key = `${pool.toLowerCase()}:${stable ? "1" : "0"}`;
+  if (state.aerodromeV2PoolFeeByAddress.has(key)) {
+    return state.aerodromeV2PoolFeeByAddress.get(key);
+  }
+  try {
+    const factory = new ethers.Contract(AERODROME_V2_PAIR_FACTORY_ADDRESS, AERODROME_V2_FACTORY_ABI, provider);
+    const feeRaw = await factory.getFee(pool, stable);
+    const fee = Number(feeRaw);
+    const resolved = Number.isFinite(fee) ? fee : null;
+    state.aerodromeV2PoolFeeByAddress.set(key, resolved);
+    return resolved;
+  } catch {
+    state.aerodromeV2PoolFeeByAddress.set(key, null);
+    return null;
+  }
+}
+
+async function fetchAerodromeV2PoolSnapshot(poolAddress, provider) {
+  const pool = new ethers.Contract(poolAddress, AERODROME_V2_POOL_ABI, provider);
+  try {
+    const metadata = await pool.metadata();
+    const token0 = ethers.getAddress(metadata.t0 ?? metadata[5]);
+    const token1 = ethers.getAddress(metadata.t1 ?? metadata[6]);
+    const reserve0 = BigInt(metadata.r0 ?? metadata[2]);
+    const reserve1 = BigInt(metadata.r1 ?? metadata[3]);
+    const stable = Boolean(metadata.st ?? metadata[4]);
+    return { token0, token1, reserve0, reserve1, stable };
+  } catch {
+    const [token0Raw, token1Raw, reserve0Raw, reserve1Raw, stableRaw] = await Promise.all([
+      pool.token0(),
+      pool.token1(),
+      pool.reserve0(),
+      pool.reserve1(),
+      pool.stable()
+    ]);
+    return {
+      token0: ethers.getAddress(token0Raw),
+      token1: ethers.getAddress(token1Raw),
+      reserve0: BigInt(reserve0Raw),
+      reserve1: BigInt(reserve1Raw),
+      stable: Boolean(stableRaw)
+    };
+  }
+}
+
+async function findAerodromeGaugeCounterparties(vfatContract, apiKey) {
+  const normalizedVfat = ethers.getAddress(vfatContract);
+  const [outbound, inbound] = await Promise.all([
+    fetchErc20TransfersInWindow(apiKey, {
+      fromAddress: normalizedVfat
+    }),
+    fetchErc20TransfersInWindow(apiKey, {
+      toAddress: normalizedVfat
+    })
+  ]);
+
+  const counterparties = new Set();
+  const vfatLower = normalizedVfat.toLowerCase();
+  for (const transfer of [...outbound, ...inbound]) {
+    const from = normalizeNullableAddress(transfer?.from);
+    const to = normalizeNullableAddress(transfer?.to);
+    if (!from || !to) {
+      continue;
+    }
+    const fromLower = from.toLowerCase();
+    const toLower = to.toLowerCase();
+    if (fromLower === vfatLower && toLower !== vfatLower && toLower !== ZeroAddress.toLowerCase()) {
+      counterparties.add(to);
+      continue;
+    }
+    if (toLower === vfatLower && fromLower !== vfatLower && fromLower !== ZeroAddress.toLowerCase()) {
+      counterparties.add(from);
+    }
+  }
+  return [...counterparties];
+}
+
+async function buildAerodromeV2Row(vfatContract, gaugeAddress, blockWindow, apiKey, provider) {
+  const normalizedVfat = ethers.getAddress(vfatContract);
+  const normalizedGauge = ethers.getAddress(gaugeAddress);
+  const defaults = {
+    fees24hToken0: null,
+    fees24hToken1: null,
+    fees24hUsd: 0,
+    emissions24hUsd: null,
+    emissions24hBreakdown: [],
+    vfatFeesClaimableNowUsd: 0,
+    vfatEmissionsClaimableNowUsd: null,
+    vfatClaimableNowUsd: null,
+    vfatInRange: null,
+    apr24hPct: null,
+    metricsQuality: "partial",
+    metricsReason: "partial_call_failed"
+  };
+
+  try {
+    const gauge = new ethers.Contract(normalizedGauge, AERODROME_V2_GAUGE_ABI, provider);
+    const stakedBalance = BigInt(await gauge.balanceOf(normalizedVfat));
+    if (stakedBalance <= 0n) {
+      return null;
+    }
+    const vfatTokenIdHex = `0x${normalizedVfat.slice(2).toLowerCase()}`;
+    const vfatTokenIdDecimal = tokenIdToDecimal(vfatTokenIdHex);
+
+    const baseRow = {
+      ...defaults,
+      source: "vfat",
+      positionType: "aerodrome_v2",
+      protocol: AERODROME_V2_PROTOCOL,
+      tokenContract: normalizedGauge,
+      tokenIdHex: vfatTokenIdHex,
+      tokenIdDecimal: vfatTokenIdDecimal,
+      tokenKey: `vfatv2:${normalizedVfat.toLowerCase()}:${normalizedGauge.toLowerCase()}`,
+      vfatContract: normalizedVfat,
+      currentOwner: normalizedVfat,
+      ownerScope: "vfat",
+      ownerCheck: "confirmed",
+      ownerResolved: normalizedVfat.toLowerCase(),
+      liveLiquidity: stakedBalance.toString(),
+      adapterType: "aerodrome_v2_gauge",
+      poolPair: "Unknown/Unknown",
+      poolFee: null,
+      poolStable: null,
+      poolToken0: null,
+      poolToken1: null,
+      poolTickLower: null,
+      poolTickUpper: null,
+      poolRangeLowerPrice: null,
+      poolRangeUpperPrice: null,
+      poolCurrentPrice: null,
+      currentPoolUsd: null
+    };
+
+    const [poolAddressRaw, rewardTokenRaw] = await Promise.all([
+      gauge.stakingToken(),
+      gauge.rewardToken()
+    ]);
+    const poolAddress = ethers.getAddress(poolAddressRaw);
+    const rewardToken = ethers.getAddress(rewardTokenRaw);
+
+    if (!(await isAerodromeV2Pool(poolAddress, provider))) {
+      return null;
+    }
+
+    let row = { ...baseRow };
+    try {
+      const [poolSnapshot, totalSupplyRaw] = await Promise.all([
+        fetchAerodromeV2PoolSnapshot(poolAddress, provider),
+        new ethers.Contract(poolAddress, AERODROME_V2_POOL_ABI, provider).totalSupply()
+      ]);
+      const totalSupply = BigInt(totalSupplyRaw);
+      if (totalSupply > 0n) {
+        const amount0Raw = (stakedBalance * poolSnapshot.reserve0) / totalSupply;
+        const amount1Raw = (stakedBalance * poolSnapshot.reserve1) / totalSupply;
+        const [token0Meta, token1Meta] = await Promise.all([
+          getTokenMeta(poolSnapshot.token0, provider),
+          getTokenMeta(poolSnapshot.token1, provider)
+        ]);
+        const prices = await getPrices([token0Meta.address, token1Meta.address], apiKey);
+        const token0Price = prices[token0Meta.address];
+        const token1Price = prices[token1Meta.address];
+        const pooled0 = normalizeAmount(amount0Raw, token0Meta.decimals);
+        const pooled1 = normalizeAmount(amount1Raw, token1Meta.decimals);
+        const currentPoolUsd = (Number.isFinite(token0Price) ? pooled0 * token0Price : 0)
+          + (Number.isFinite(token1Price) ? pooled1 * token1Price : 0);
+        const poolFee = await resolveAerodromeV2PoolFee(poolAddress, poolSnapshot.stable, provider);
+        row = {
+          ...row,
+          poolPair: `${token0Meta.symbol}/${token1Meta.symbol} (${poolSnapshot.stable ? "stable" : "volatile"})`,
+          poolFee,
+          poolStable: poolSnapshot.stable,
+          poolToken0: token0Meta.address,
+          poolToken1: token1Meta.address,
+          currentPoolUsd
+        };
+      }
+    } catch {
+      // Keep row as partial if valuation fails.
+    }
+
+    if (!blockWindow) {
+      return row;
+    }
+
+    try {
+      const [pendingNowRaw, pendingStartRaw] = await Promise.all([
+        gauge.earned(normalizedVfat),
+        gauge.earned(normalizedVfat, { blockTag: blockWindow.fromBlock })
+      ]);
+      const pendingNow = BigInt(pendingNowRaw);
+      const pendingStart = BigInt(pendingStartRaw);
+      const rewardMeta = await getTokenMeta(rewardToken, provider);
+      const rewardPrices = await getPrices([rewardMeta.address], apiKey);
+      const rewardPrice = rewardPrices[rewardMeta.address];
+      if (!Number.isFinite(rewardPrice)) {
+        return row;
+      }
+
+      const rewardTransfers = await fetchErc20TransfersInWindow(apiKey, {
+        fromAddress: normalizedGauge,
+        toAddress: normalizedVfat,
+        contractAddresses: [rewardToken],
+        fromBlockTag: blockWindow.fromBlockTag,
+        toBlockTag: blockWindow.toBlockTag
+      });
+      let realizedReward = 0n;
+      for (const transfer of rewardTransfers) {
+        const amount = parseTransferRawAmount(transfer);
+        if (amount > 0n) {
+          realizedReward += amount;
+        }
+      }
+
+      const pendingDelta = safePositive(pendingNow - pendingStart);
+      const emissionsRaw = pendingDelta + realizedReward;
+      const emissions24hAmount = normalizeAmount(emissionsRaw, rewardMeta.decimals);
+      const pendingNowAmount = normalizeAmount(pendingNow, rewardMeta.decimals);
+      const emissions24hUsd = emissions24hAmount * rewardPrice;
+      const pendingNowUsd = pendingNowAmount * rewardPrice;
+      const apr24hPct = Number.isFinite(row.currentPoolUsd) && row.currentPoolUsd > 0
+        ? (emissions24hUsd / row.currentPoolUsd) * 365 * 100
+        : null;
+
+      return {
+        ...row,
+        emissions24hUsd,
+        emissions24hBreakdown: [{
+          token: rewardMeta.address,
+          symbol: rewardMeta.symbol,
+          amount: emissions24hAmount,
+          usd: emissions24hUsd,
+          pendingNow: pendingNowAmount
+        }],
+        vfatEmissionsClaimableNowUsd: pendingNowUsd,
+        vfatClaimableNowUsd: pendingNowUsd,
+        apr24hPct,
+        metricsQuality: "full",
+        metricsReason: "full"
+      };
+    } catch {
+      return row;
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function fetchVFatAerodromeV2Rows(vfatContracts, apiKey, provider, onStatus = () => {}) {
+  if (!vfatContracts?.length) {
+    return [];
+  }
+
+  let blockWindow = null;
+  try {
+    onStatus("Resolving 24h block window for Aerodrome V2 metrics...");
+    blockWindow = await resolve24hBlockWindow(apiKey);
+  } catch {
+    // Keep V2 valuation path alive even if 24h metrics window resolution fails.
+  }
+
+  const rows = [];
+  for (let i = 0; i < vfatContracts.length; i += 1) {
+    const vfatContract = ethers.getAddress(vfatContracts[i].address || vfatContracts[i]);
+    onStatus(`Scanning Aerodrome V2 gauges for ${shortenAddress(vfatContract)} (${i + 1}/${vfatContracts.length})...`);
+    const counterparties = await findAerodromeGaugeCounterparties(vfatContract, apiKey);
+    const gaugeChecks = await Promise.allSettled(counterparties.map((address) => isAerodromeGauge(address, provider)));
+    const gauges = [];
+    for (let j = 0; j < counterparties.length; j += 1) {
+      if (gaugeChecks[j].status === "fulfilled" && gaugeChecks[j].value) {
+        gauges.push(counterparties[j]);
+      }
+    }
+    for (const gauge of gauges) {
+      const row = await buildAerodromeV2Row(vfatContract, gauge, blockWindow, apiKey, provider);
+      if (row) {
+        rows.push(row);
+      }
+    }
+  }
+  return rows.sort((a, b) => {
+    const aUsd = Number.isFinite(a.currentPoolUsd) ? a.currentPoolUsd : -Infinity;
+    const bUsd = Number.isFinite(b.currentPoolUsd) ? b.currentPoolUsd : -Infinity;
+    return bUsd - aUsd;
+  });
 }
 
 function getClaimScopeKey(row) {
@@ -1487,12 +1866,8 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
   let pendingNow;
   let pendingStart;
   try {
-    const [nowResult, startResult] = await Promise.all([
-      rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, "latest"]),
-      rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, blockWindow.fromBlockTag])
-    ]);
+    const nowResult = await rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, "latest"]);
     pendingNow = decodeUint256CallResult(nowResult);
-    pendingStart = decodeUint256CallResult(startResult);
   } catch {
     return {
       emissions24hUsd: null,
@@ -1501,6 +1876,23 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
       metricsQuality: "partial",
       metricsReason: "partial_call_failed"
     };
+  }
+  try {
+    const startResult = await rpcCall(apiKey, "eth_call", [{ to: gaugeAddress, data: earnedData }, blockWindow.fromBlockTag]);
+    pendingStart = decodeUint256CallResult(startResult);
+  } catch (error) {
+    const canUseZeroBaseline = isExecutionRevertedNaError(error) && isRecentPositionActivityWithinWindow(row, blockWindow);
+    if (canUseZeroBaseline) {
+      pendingStart = 0n;
+    } else {
+      return {
+        emissions24hUsd: null,
+        emissions24hBreakdown: [],
+        pendingEmissionsNowUsd: null,
+        metricsQuality: "partial",
+        metricsReason: "partial_call_failed"
+      };
+    }
   }
 
   let realizedAttributed = 0n;
@@ -1963,7 +2355,9 @@ async function buildCurrentOwnedRows(historyRows, apiKey, provider, onStatus = (
       currentOwner: latest.to,
       ownerScope: latestOwner === vfatLower ? "vfat" : "external",
       ownerCheck: "unchecked",
-      ownerResolved: null
+      ownerResolved: null,
+      positionType: latest.positionType || "cl",
+      poolStable: null
     });
   }
 
@@ -2007,6 +2401,8 @@ async function buildCurrentOwnedRows(historyRows, apiKey, provider, onStatus = (
     row.poolRangeLowerPrice = validation.value.rangeLowerPrice;
     row.poolRangeUpperPrice = validation.value.rangeUpperPrice;
     row.poolCurrentPrice = validation.value.currentPrice;
+    row.positionType = row.positionType || "cl";
+    row.poolStable = null;
     row.adapterType = await classifyOwnerAdapter(row, apiKey);
     filteredRows.push(row);
   }
@@ -2034,7 +2430,10 @@ async function fetchVFatClDataForWallet(wallet, apiKey, provider, onStatus = () 
   const currentOwnedRows = await buildCurrentOwnedRows(vfatClHistoryRows, apiKey, provider, onStatus);
   onStatus("Computing 24h fees, emissions, and APR for active CL positions...");
   const vfatClCurrentRows = await enrichCurrentRowsWith24hMetrics(currentOwnedRows, apiKey, provider, onStatus);
+  onStatus("Discovering Aerodrome V2 gauge-staked LP positions for VFat contracts...");
+  const vfatV2CurrentRows = await fetchVFatAerodromeV2Rows(identifiedVfatContracts, apiKey, provider, onStatus);
   const vfatClCurrentTokenCount = vfatClCurrentRows.length;
+  const vfatV2CurrentTokenCount = vfatV2CurrentRows.length;
   const vfatClOwnedByVfatCount = vfatClCurrentRows.filter((row) => row.ownerScope === "vfat").length;
   const vfatClExternalizedCount = vfatClCurrentRows.filter((row) => row.ownerScope === "external").length;
   const vfatClUncertainCount = vfatClCurrentRows.filter((row) => row.ownerCheck !== "confirmed").length;
@@ -2045,7 +2444,9 @@ async function fetchVFatClDataForWallet(wallet, apiKey, provider, onStatus = () 
     deployedContracts,
     vfatContracts: identifiedVfatContracts,
     vfatClCurrentRows,
+    vfatV2CurrentRows,
     vfatClCurrentTokenCount,
+    vfatV2CurrentTokenCount,
     vfatClOwnedByVfatCount,
     vfatClExternalizedCount,
     vfatClUncertainCount
@@ -2526,6 +2927,7 @@ function normalizeStandardOpenPositionRow(position, owner) {
   const tokenIdHex = normalizeTokenIdHex(`0x${BigInt(position.tokenId).toString(16)}`);
   return {
     source: "standard",
+    positionType: "cl",
     protocol,
     protocolDisplay: protocol,
     tokenContract: ethers.getAddress(NFPM_ADDRESS),
@@ -2545,6 +2947,7 @@ function normalizeStandardOpenPositionRow(position, owner) {
     poolToken1: position.token1.address,
     poolTickLower: Number(position.position.tickLower),
     poolTickUpper: Number(position.position.tickUpper),
+    poolStable: null,
     poolRangeLowerPrice: Number.isFinite(position.rangePriceLower) ? position.rangePriceLower : null,
     poolRangeUpperPrice: Number.isFinite(position.rangePriceUpper) ? position.rangePriceUpper : null,
     poolCurrentPrice: Number.isFinite(position.price0) ? position.price0 : null
@@ -2592,6 +2995,7 @@ function buildUnifiedSummaryTotals(openRows) {
   let claimableUsd = 0;
   let inRangeCount = 0;
   let rangeConsideredCount = 0;
+  let clOpenCount = 0;
   const uniquePools = new Set();
 
   for (const row of (openRows || [])) {
@@ -2601,10 +3005,13 @@ function buildUnifiedSummaryTotals(openRows) {
     if (Number.isFinite(row.vfatClaimableNowUsd)) {
       claimableUsd += row.vfatClaimableNowUsd;
     }
-    if (typeof row.vfatInRange === "boolean") {
-      rangeConsideredCount += 1;
-      if (row.vfatInRange) {
-        inRangeCount += 1;
+    if ((row.positionType || "cl") === "cl") {
+      clOpenCount += 1;
+      if (typeof row.vfatInRange === "boolean") {
+        rangeConsideredCount += 1;
+        if (row.vfatInRange) {
+          inRangeCount += 1;
+        }
       }
     }
     if (row.poolPair) {
@@ -2613,7 +3020,7 @@ function buildUnifiedSummaryTotals(openRows) {
   }
 
   const openCount = (openRows || []).length;
-  const rangeExcludedCount = openCount - rangeConsideredCount;
+  const rangeExcludedCount = clOpenCount - rangeConsideredCount;
 
   return {
     pooledUsd,
@@ -2649,7 +3056,9 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
   const vfatData = {
     vfatContracts: [],
     vfatClCurrentRows: [],
+    vfatV2CurrentRows: [],
     vfatClCurrentTokenCount: 0,
+    vfatV2CurrentTokenCount: 0,
     vfatClOwnedByVfatCount: 0,
     vfatClExternalizedCount: 0,
     vfatClUncertainCount: 0,
@@ -2660,16 +3069,21 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
     const fetchedVfat = await fetchVFatClDataForWallet(owner, apiKey, provider, onStatus);
     vfatData.vfatContracts = fetchedVfat.vfatContracts;
     vfatData.vfatClCurrentRows = fetchedVfat.vfatClCurrentRows;
+    vfatData.vfatV2CurrentRows = fetchedVfat.vfatV2CurrentRows;
     vfatData.vfatClCurrentTokenCount = fetchedVfat.vfatClCurrentTokenCount;
+    vfatData.vfatV2CurrentTokenCount = fetchedVfat.vfatV2CurrentTokenCount;
     vfatData.vfatClOwnedByVfatCount = fetchedVfat.vfatClOwnedByVfatCount;
     vfatData.vfatClExternalizedCount = fetchedVfat.vfatClExternalizedCount;
     vfatData.vfatClUncertainCount = fetchedVfat.vfatClUncertainCount;
   } catch (error) {
-    vfatData.vfatClError = error?.message || "Failed to fetch VFat CL position transfers.";
+    vfatData.vfatClError = error?.message || "Failed to fetch VFat position data.";
   }
 
   const standardRows = annotateProtocolDisplay(standardRowsEnriched, { isVfat: false });
-  const vfatRows = annotateProtocolDisplay(vfatData.vfatClCurrentRows, { isVfat: true });
+  const vfatRows = annotateProtocolDisplay([
+    ...(vfatData.vfatClCurrentRows || []),
+    ...(vfatData.vfatV2CurrentRows || [])
+  ], { isVfat: true });
   const mergedOpen = mergeOpenRowsWithVfatPreference(standardRows, vfatRows);
   const unifiedTotals = buildUnifiedSummaryTotals(mergedOpen.openRows);
 
@@ -2679,7 +3093,10 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
     openRowsDedupeCount: mergedOpen.dedupeCount,
     vfatContracts: vfatData.vfatContracts,
     vfatClCurrentRows: vfatData.vfatClCurrentRows,
+    vfatV2CurrentRows: vfatData.vfatV2CurrentRows,
     vfatClCurrentTokenCount: vfatData.vfatClCurrentTokenCount,
+    vfatV2CurrentTokenCount: vfatData.vfatV2CurrentTokenCount,
+    vfatCurrentTokenCount: vfatData.vfatClCurrentTokenCount + vfatData.vfatV2CurrentTokenCount,
     vfatClOwnedByVfatCount: vfatData.vfatClOwnedByVfatCount,
     vfatClExternalizedCount: vfatData.vfatClExternalizedCount,
     vfatClUncertainCount: vfatData.vfatClUncertainCount,
@@ -2725,7 +3142,9 @@ function renderSummary(portfolio) {
 
 function renderOpenSectionDiagnostics(portfolio) {
   const vfatCount = portfolio.vfatContracts.length;
-  const vfatPositionCount = portfolio.vfatClCurrentRows.length;
+  const vfatPositionCount = Number.isFinite(portfolio.vfatCurrentTokenCount)
+    ? portfolio.vfatCurrentTokenCount
+    : ((portfolio.vfatClCurrentRows?.length || 0) + (portfolio.vfatV2CurrentRows?.length || 0));
   const uncertainCount = portfolio.vfatClUncertainCount;
 
   if (els.vfatContractsCountChip) {
@@ -2742,7 +3161,7 @@ function renderOpenSectionDiagnostics(portfolio) {
   }
   if (els.vfatErrorText) {
     if (portfolio.vfatClError) {
-      els.vfatErrorText.textContent = `VFat CL pipeline warning: ${portfolio.vfatClError}`;
+      els.vfatErrorText.textContent = `VFat pipeline warning: ${portfolio.vfatClError}`;
       els.vfatErrorText.classList.remove("hidden");
     } else {
       els.vfatErrorText.textContent = "";
@@ -2828,6 +3247,9 @@ function buildFeesEmissionsDisplay(row, quality) {
 }
 
 function resolveClRangeState(row) {
+  if ((row.positionType || "cl") === "aerodrome_v2") {
+    return "in";
+  }
   const hasRange = Number.isFinite(row.poolRangeLowerPrice) && Number.isFinite(row.poolRangeUpperPrice);
   const hasCurrent = Number.isFinite(row.poolCurrentPrice);
   if (!hasRange || !hasCurrent || row.poolRangeUpperPrice <= row.poolRangeLowerPrice) {
