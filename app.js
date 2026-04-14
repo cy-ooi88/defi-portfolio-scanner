@@ -285,6 +285,8 @@ const VFAT_CONTRACT_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const RPC_MAX_RETRIES = 3;
 const PRICE_MAX_RETRIES = 2;
 const RETRY_BASE_MS = 220;
+const TRACE_MAX_FIELD_CHARS = 24000;
+const TRACE_MAX_ENTRIES = 20000;
 
 const state = {
   provider: null,
@@ -305,7 +307,11 @@ const state = {
   jazziconFactoryPromise: null,
   introPlayed: false,
   introCleanupTimer: null,
-  updatePulseTimer: null
+  updatePulseTimer: null,
+  traceSessionId: 0,
+  traceStartedAt: "",
+  traceEntries: [],
+  traceOverflowed: false
 };
 
 const els = {
@@ -313,6 +319,7 @@ const els = {
   refreshButton: document.getElementById("refreshButton"),
   refreshTopButton: document.getElementById("refreshTopButton"),
   settingsButton: document.getElementById("settingsButton"),
+  downloadLogsButton: document.getElementById("downloadLogsButton"),
   settingsOverlay: document.getElementById("settingsOverlay"),
   settingsCloseButton: document.getElementById("settingsCloseButton"),
   walletInput: document.getElementById("walletInput"),
@@ -567,6 +574,114 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function maskAlchemySecrets(text) {
+  if (typeof text !== "string" || !text) {
+    return text;
+  }
+  return text
+    .replace(/(g\.alchemy\.com\/v2\/)[^"'\s/?]+/gi, "$1***")
+    .replace(/(api\.g\.alchemy\.com\/prices\/v1\/)[^"'\s/?]+/gi, "$1***");
+}
+
+function truncateTraceField(value) {
+  const text = String(value ?? "");
+  if (text.length <= TRACE_MAX_FIELD_CHARS) {
+    return text;
+  }
+  return `${text.slice(0, TRACE_MAX_FIELD_CHARS)}... [truncated ${text.length - TRACE_MAX_FIELD_CHARS} chars]`;
+}
+
+function normalizeTraceField(value) {
+  if (typeof value === "string") {
+    return truncateTraceField(maskAlchemySecrets(value));
+  }
+  try {
+    const serialized = JSON.stringify(value, (_key, innerValue) => (
+      typeof innerValue === "bigint" ? innerValue.toString() : innerValue
+    ));
+    return truncateTraceField(maskAlchemySecrets(serialized));
+  } catch {
+    return truncateTraceField(maskAlchemySecrets(String(value)));
+  }
+}
+
+function pushTrace(eventType, fields = {}) {
+  if (state.traceEntries.length >= TRACE_MAX_ENTRIES) {
+    if (!state.traceOverflowed) {
+      state.traceOverflowed = true;
+      state.traceEntries.push({
+        index: state.traceEntries.length + 1,
+        at: new Date().toISOString(),
+        eventType: "trace_overflow",
+        fields: {
+          message: `Trace entry limit (${TRACE_MAX_ENTRIES}) reached. Further events were dropped.`
+        }
+      });
+    }
+    return;
+  }
+
+  const normalizedFields = {};
+  for (const [key, value] of Object.entries(fields || {})) {
+    normalizedFields[key] = normalizeTraceField(value);
+  }
+  state.traceEntries.push({
+    index: state.traceEntries.length + 1,
+    at: new Date().toISOString(),
+    eventType,
+    fields: normalizedFields
+  });
+}
+
+function startTraceSession(label = "manual_lookup") {
+  state.traceSessionId += 1;
+  state.traceStartedAt = new Date().toISOString();
+  state.traceEntries = [];
+  state.traceOverflowed = false;
+  pushTrace("session", {
+    message: `lookup_start ${label}`
+  });
+}
+
+function traceLogFilename(date = new Date()) {
+  const iso = date.toISOString().replace(/[:.]/g, "-");
+  return `alchemy_trace_${iso}.log`;
+}
+
+function buildTraceLogText() {
+  const lines = [];
+  lines.push(`# Defi Portfolio Scanner Trace`);
+  lines.push(`session_id: ${state.traceSessionId}`);
+  lines.push(`session_started_at: ${state.traceStartedAt || new Date().toISOString()}`);
+  lines.push(`entry_count: ${state.traceEntries.length}`);
+  for (const entry of state.traceEntries) {
+    lines.push("");
+    lines.push(`[${entry.at}] #${entry.index} ${entry.eventType}`);
+    for (const [key, value] of Object.entries(entry.fields || {})) {
+      lines.push(`${key}: ${value}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function downloadTraceLogs() {
+  if (!state.traceEntries.length) {
+    setStatus("No trace logs available yet. Run a lookup first.", "warning");
+    return;
+  }
+  const text = buildTraceLogText();
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = traceLogFilename(new Date());
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  setStatus(`Trace log downloaded (${state.traceEntries.length} events).`, "success");
+}
+
 function isRetryableHttpStatus(status) {
   return status === 408 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
@@ -583,48 +698,131 @@ function isRetryableRpcPayloadError(errorPayload) {
 function getProvider(apiKey) {
   const providerKey = `${ACTIVE_CHAIN_KEY}:${apiKey}`;
   if (!state.provider || state.providerKey !== providerKey) {
-    state.provider = new ethers.JsonRpcProvider(`https://${CHAIN_RPC_NETWORK}.g.alchemy.com/v2/${apiKey}`, CHAIN_ID, {
+    const requestUrl = `https://${CHAIN_RPC_NETWORK}.g.alchemy.com/v2/${apiKey}`;
+    const chainKey = ACTIVE_CHAIN_KEY;
+    const provider = new ethers.JsonRpcProvider(requestUrl, CHAIN_ID, {
       staticNetwork: true
     });
+    const originalSend = provider.send.bind(provider);
+    provider.send = async (method, params) => {
+      pushTrace("provider_request", {
+        chain: chainKey,
+        method,
+        url: requestUrl,
+        request: { method, params }
+      });
+      try {
+        const result = await originalSend(method, params);
+        pushTrace("provider_response", {
+          chain: chainKey,
+          method,
+          url: requestUrl,
+          result
+        });
+        return result;
+      } catch (error) {
+        pushTrace("provider_error", {
+          chain: chainKey,
+          method,
+          url: requestUrl,
+          error: error?.message || String(error)
+        });
+        throw error;
+      }
+    };
+    state.provider = provider;
     state.providerKey = providerKey;
   }
   return state.provider;
 }
 
 async function rpcCall(apiKey, method, params) {
+  const requestUrl = `https://${CHAIN_RPC_NETWORK}.g.alchemy.com/v2/${apiKey}`;
   let lastError = null;
   for (let attempt = 0; attempt <= RPC_MAX_RETRIES; attempt += 1) {
+    const attemptNumber = attempt + 1;
+    const requestPayload = {
+      jsonrpc: "2.0",
+      id: attemptNumber,
+      method,
+      params
+    };
+    pushTrace("rpc_request", {
+      chain: ACTIVE_CHAIN_KEY,
+      method,
+      attempt: attemptNumber,
+      url: requestUrl,
+      request: requestPayload
+    });
     try {
-      const response = await fetch(`https://${CHAIN_RPC_NETWORK}.g.alchemy.com/v2/${apiKey}`, {
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: attempt + 1,
-          method,
-          params
-        })
+        body: JSON.stringify(requestPayload)
+      });
+      const rawBody = await response.text();
+      let payload = null;
+      try {
+        payload = rawBody ? JSON.parse(rawBody) : null;
+      } catch {
+        payload = null;
+      }
+
+      pushTrace("rpc_response", {
+        chain: ACTIVE_CHAIN_KEY,
+        method,
+        attempt: attemptNumber,
+        url: requestUrl,
+        status: response.status,
+        response: payload ?? rawBody
       });
 
       if (!response.ok) {
+        const httpErrorMessage = payload?.error?.message
+          || rawBody
+          || `RPC request failed (${response.status})`;
+        pushTrace("rpc_http_error", {
+          chain: ACTIVE_CHAIN_KEY,
+          method,
+          attempt: attemptNumber,
+          url: requestUrl,
+          status: response.status,
+          error: `RPC request failed (${response.status}): ${httpErrorMessage}`
+        });
         if (attempt < RPC_MAX_RETRIES && isRetryableHttpStatus(response.status)) {
           await delay(RETRY_BASE_MS * (attempt + 1));
           continue;
         }
-        throw new Error(`RPC request failed (${response.status})`);
+        throw new Error(`RPC request failed (${response.status}): ${httpErrorMessage}`);
       }
 
-      const payload = await response.json();
-      if (payload.error) {
+      if (payload?.error) {
+        pushTrace("rpc_payload_error", {
+          chain: ACTIVE_CHAIN_KEY,
+          method,
+          attempt: attemptNumber,
+          url: requestUrl,
+          error: payload.error
+        });
         if (attempt < RPC_MAX_RETRIES && isRetryableRpcPayloadError(payload.error)) {
           await delay(RETRY_BASE_MS * (attempt + 1));
           continue;
         }
         throw new Error(payload.error.message || `RPC error for ${method}`);
       }
+      if (!payload || !Object.prototype.hasOwnProperty.call(payload, "result")) {
+        throw new Error(`RPC malformed response for ${method}`);
+      }
       return payload.result;
     } catch (error) {
       lastError = error;
+      pushTrace("rpc_exception", {
+        chain: ACTIVE_CHAIN_KEY,
+        method,
+        attempt: attemptNumber,
+        url: requestUrl,
+        error: error?.message || String(error)
+      });
       if (attempt >= RPC_MAX_RETRIES) {
         break;
       }
@@ -867,6 +1065,16 @@ function parseHexToNumber(value) {
     return 0;
   }
   return Number.parseInt(value, 16) || 0;
+}
+
+function resolveBlockNumberFromTag(tag) {
+  if (typeof tag === "number" && Number.isFinite(tag)) {
+    return tag;
+  }
+  if (typeof tag === "string" && tag.startsWith("0x")) {
+    return parseHexToNumber(tag);
+  }
+  return null;
 }
 
 function parseHexToBigInt(value) {
@@ -1465,6 +1673,27 @@ function parseCollectLogAmounts(log) {
 }
 
 async function fetchCollectAmounts24h(row, apiKey, blockWindow) {
+  const fromBlock = Number.isFinite(blockWindow?.fromBlock)
+    ? blockWindow.fromBlock
+    : resolveBlockNumberFromTag(blockWindow?.fromBlockTag);
+  const toBlock = Number.isFinite(blockWindow?.toBlock)
+    ? blockWindow.toBlock
+    : resolveBlockNumberFromTag(blockWindow?.toBlockTag);
+  const isRangeTooWide = Number.isFinite(fromBlock)
+    && Number.isFinite(toBlock)
+    && (toBlock - fromBlock > 9);
+  if (isRangeTooWide) {
+    pushTrace("collect_logs_skipped", {
+      chain: ACTIVE_CHAIN_KEY,
+      tokenContract: row.tokenContract,
+      tokenIdHex: row.tokenIdHex,
+      fromBlock,
+      toBlock,
+      reason: "eth_getLogs skipped for Free-tier block-range limit (>10 inclusive blocks unsupported)"
+    });
+    return { amount0: 0n, amount1: 0n };
+  }
+
   const tokenTopic = tokenIdToTopic(row.tokenIdHex);
   const logs = [];
 
@@ -3013,33 +3242,72 @@ async function getPrices(addresses, apiKey) {
     let payload = null;
     let resolved = false;
     let lastError = null;
+    const requestUrl = `${PRICE_API_BASE}/${apiKey}/tokens/by-address`;
 
     for (let attempt = 0; attempt <= PRICE_MAX_RETRIES; attempt += 1) {
+      const attemptNumber = attempt + 1;
+      const requestPayload = {
+        addresses: missing.map((address) => ({
+          network: CHAIN_PRICE_NETWORK,
+          address
+        }))
+      };
+      pushTrace("price_request", {
+        chain: ACTIVE_CHAIN_KEY,
+        attempt: attemptNumber,
+        url: requestUrl,
+        request: requestPayload
+      });
       try {
-        const response = await fetch(`${PRICE_API_BASE}/${apiKey}/tokens/by-address`, {
+        const response = await fetch(requestUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            addresses: missing.map((address) => ({
-              network: CHAIN_PRICE_NETWORK,
-              address
-            }))
-          })
+          body: JSON.stringify(requestPayload)
+        });
+        const rawBody = await response.text();
+        let parsedPayload = null;
+        try {
+          parsedPayload = rawBody ? JSON.parse(rawBody) : null;
+        } catch {
+          parsedPayload = null;
+        }
+        pushTrace("price_response", {
+          chain: ACTIVE_CHAIN_KEY,
+          attempt: attemptNumber,
+          url: requestUrl,
+          status: response.status,
+          response: parsedPayload ?? rawBody
         });
 
         if (!response.ok) {
+          const httpErrorMessage = parsedPayload?.error?.message
+            || rawBody
+            || `Price lookup failed (${response.status})`;
+          pushTrace("price_http_error", {
+            chain: ACTIVE_CHAIN_KEY,
+            attempt: attemptNumber,
+            url: requestUrl,
+            status: response.status,
+            error: `Price lookup failed (${response.status}): ${httpErrorMessage}`
+          });
           if (attempt < PRICE_MAX_RETRIES && isRetryableHttpStatus(response.status)) {
             await delay(RETRY_BASE_MS * (attempt + 1));
             continue;
           }
-          throw new Error(`Price lookup failed (${response.status})`);
+          throw new Error(`Price lookup failed (${response.status}): ${httpErrorMessage}`);
         }
 
-        payload = await response.json();
+        payload = parsedPayload || { data: [] };
         resolved = true;
         break;
       } catch (error) {
         lastError = error;
+        pushTrace("price_exception", {
+          chain: ACTIVE_CHAIN_KEY,
+          attempt: attemptNumber,
+          url: requestUrl,
+          error: error?.message || String(error)
+        });
         if (attempt >= PRICE_MAX_RETRIES) {
           break;
         }
@@ -3848,8 +4116,12 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
   const apiKey = els.alchemyInput.value.trim();
   persistCredentials(wallet, apiKey);
   syncCredentialBanner();
+  startTraceSession(`wallet=${wallet || "missing_wallet"}`);
 
   if (!wallet) {
+    pushTrace("lookup_validation_error", {
+      reason: "missing_wallet"
+    });
     setStatus("Enter a wallet address in Settings.", "error");
     if (els.lastUpdatedText) {
       els.lastUpdatedText.textContent = "Waiting for credentials.";
@@ -3860,6 +4132,10 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
     return;
   }
   if (!apiKey) {
+    pushTrace("lookup_validation_error", {
+      reason: "missing_api_key",
+      wallet
+    });
     setStatus("Enter an Alchemy API key in Settings.", "error");
     if (els.lastUpdatedText) {
       els.lastUpdatedText.textContent = "Waiting for credentials.";
@@ -3882,13 +4158,25 @@ async function runLookup({ openSettingsOnMissing = false } = {}) {
       els.lastUpdatedText.textContent = `Last updated ${formatTimeStamp(new Date())}`;
     }
     closeSettings();
+    pushTrace("lookup_success", {
+      openCount: portfolio?.totals?.openCount ?? 0,
+      poolCount: portfolio?.totals?.poolCount ?? 0,
+      vfatContracts: portfolio?.vfatContracts?.length ?? 0,
+      vfatPositions: portfolio?.vfatCurrentTokenCount ?? 0
+    });
   } catch (error) {
+    pushTrace("lookup_error", {
+      error: error?.message || String(error)
+    });
     clearDashboard();
     setStatus(error.message || "Something went wrong while loading positions.", "error");
     if (els.lastUpdatedText) {
       els.lastUpdatedText.textContent = "Fetch failed.";
     }
   } finally {
+    pushTrace("session", {
+      message: `lookup_end rendered=${didRender}`
+    });
     setBusy(false);
     if (didRender) {
       runIntroMotionOnce();
@@ -3916,6 +4204,12 @@ els.form.addEventListener("submit", async (event) => {
 els.settingsButton.addEventListener("click", () => {
   openSettings();
 });
+
+if (els.downloadLogsButton) {
+  els.downloadLogsButton.addEventListener("click", () => {
+    downloadTraceLogs();
+  });
+}
 
 els.settingsCloseButton.addEventListener("click", () => {
   closeSettings();
