@@ -695,6 +695,15 @@ function isRetryableRpcPayloadError(errorPayload) {
   return /rate|limit|too many|timeout|temporar|busy|capacity|unavailable|gateway/i.test(message);
 }
 
+function isDeterministicEthCallRevert(errorPayload) {
+  const message = String(errorPayload?.message || "");
+  const dataMessage = typeof errorPayload?.data === "string"
+    ? errorPayload.data
+    : String(errorPayload?.data?.message || "");
+  const combined = `${message} ${dataMessage}`.toLowerCase();
+  return /execution reverted|owner query for nonexistent token|nonexistent token|invalid token|revert\b/.test(combined);
+}
+
 function getProvider(apiKey) {
   const providerKey = `${ACTIVE_CHAIN_KEY}:${apiKey}`;
   if (!state.provider || state.providerKey !== providerKey) {
@@ -789,11 +798,16 @@ async function rpcCall(apiKey, method, params) {
           status: response.status,
           error: `RPC request failed (${response.status}): ${httpErrorMessage}`
         });
-        if (attempt < RPC_MAX_RETRIES && isRetryableHttpStatus(response.status)) {
+        const shouldRetryHttp = attempt < RPC_MAX_RETRIES && isRetryableHttpStatus(response.status);
+        if (shouldRetryHttp) {
           await delay(RETRY_BASE_MS * (attempt + 1));
           continue;
         }
-        throw new Error(`RPC request failed (${response.status}): ${httpErrorMessage}`);
+        const error = new Error(`RPC request failed (${response.status}): ${httpErrorMessage}`);
+        if (!isRetryableHttpStatus(response.status)) {
+          error.nonRetryable = true;
+        }
+        throw error;
       }
 
       if (payload?.error) {
@@ -804,11 +818,25 @@ async function rpcCall(apiKey, method, params) {
           url: requestUrl,
           error: payload.error
         });
-        if (attempt < RPC_MAX_RETRIES && isRetryableRpcPayloadError(payload.error)) {
+        const deterministicRevert = method === "eth_call" && isDeterministicEthCallRevert(payload.error);
+        if (deterministicRevert) {
+          pushTrace("rpc_retry_skipped", {
+            chain: ACTIVE_CHAIN_KEY,
+            method,
+            attempt: attemptNumber,
+            url: requestUrl,
+            reason: "deterministic_eth_call_revert"
+          });
+        }
+        if (attempt < RPC_MAX_RETRIES && !deterministicRevert && isRetryableRpcPayloadError(payload.error)) {
           await delay(RETRY_BASE_MS * (attempt + 1));
           continue;
         }
-        throw new Error(payload.error.message || `RPC error for ${method}`);
+        const error = new Error(payload.error.message || `RPC error for ${method}`);
+        if (deterministicRevert || !isRetryableRpcPayloadError(payload.error)) {
+          error.nonRetryable = true;
+        }
+        throw error;
       }
       if (!payload || !Object.prototype.hasOwnProperty.call(payload, "result")) {
         throw new Error(`RPC malformed response for ${method}`);
@@ -823,7 +851,7 @@ async function rpcCall(apiKey, method, params) {
         url: requestUrl,
         error: error?.message || String(error)
       });
-      if (attempt >= RPC_MAX_RETRIES) {
+      if (attempt >= RPC_MAX_RETRIES || error?.nonRetryable) {
         break;
       }
       await delay(RETRY_BASE_MS * (attempt + 1));
