@@ -1,0 +1,3 @@
+interface:
+  display_name: "DeFi Positions Summary"
+  short_description: "Run scanner + summarize positions with out-of-range pools"

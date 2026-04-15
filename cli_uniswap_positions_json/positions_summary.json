@@ -1,0 +1,276 @@
+{
+  "owner": "0x4ac9B6795A2Dfb386aD6Ac2Aa5A4B717aa8cC8e4",
+  "sourceFile": "c:\\00_projects\\08_defi_tools\\02_uniswap_positions_check\\cli_uniswap_positions_json\\vfat_output.json",
+  "rowSource": "openRows",
+  "rowCount": 6,
+  "nearThreshold": 0.1,
+  "positions": [
+    {
+      "index": 1,
+      "poolPair": "WETH/msETH",
+      "protocol": "Aerodrome SlipStream",
+      "chainName": "Base",
+      "tokenIdDecimal": "59560704",
+      "depositedUsd": 2734.0743468573382,
+      "claimableNow": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 0.22461274904285242,
+        "totalUsd": 0.22461274904285242
+      },
+      "past24h": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 1.1929660784970353,
+        "totalUsd": 1.1929660784970353
+      },
+      "apr24hPct": 15.92614404037413,
+      "range": {
+        "status": "near_out_of_range",
+        "nearThreshold": 0.1,
+        "nearestEdge": "upper",
+        "margin": 0.08018411955946202,
+        "marginPct": 8.0184119559462
+      },
+      "metricsQuality": "full",
+      "metricsReason": "full"
+    },
+    {
+      "index": 2,
+      "poolPair": "msUSD/USDC",
+      "protocol": "Aerodrome SlipStream",
+      "chainName": "Base",
+      "tokenIdDecimal": "66330666",
+      "depositedUsd": 709.8424776822842,
+      "claimableNow": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 0.06451379409058161,
+        "totalUsd": 0.06451379409058161
+      },
+      "past24h": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 0.6938042455152207,
+        "totalUsd": 0.6938042455152207
+      },
+      "apr24hPct": 35.67531636595037,
+      "range": {
+        "status": "in_range",
+        "nearThreshold": 0.1,
+        "nearestEdge": "upper",
+        "margin": 0.1202641539260155,
+        "marginPct": 12.02641539260155
+      },
+      "metricsQuality": "full",
+      "metricsReason": "full"
+    },
+    {
+      "index": 3,
+      "poolPair": "WETH/uSOL",
+      "protocol": "Aerodrome SlipStream",
+      "chainName": "Base",
+      "tokenIdDecimal": "65365975",
+      "depositedUsd": 624.0342440565654,
+      "claimableNow": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 0.20388993544790643,
+        "totalUsd": 0.20388993544790643
+      },
+      "past24h": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 1.2318269474110033,
+        "totalUsd": 1.2318269474110033
+      },
+      "apr24hPct": 72.05002611431382,
+      "range": {
+        "status": "in_range",
+        "nearThreshold": 0.1,
+        "nearestEdge": "upper",
+        "margin": 0.22027964812779444,
+        "marginPct": 22.027964812779445
+      },
+      "metricsQuality": "full",
+      "metricsReason": "full"
+    },
+    {
+      "index": 4,
+      "poolPair": "msUSD/USDC (stable)",
+      "protocol": "Aerodrome V2",
+      "chainName": "Base",
+      "tokenIdDecimal": "75756290292185969698387349395835335828857380981",
+      "depositedUsd": 247.55738331292656,
+      "claimableNow": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 0.015276000593331679,
+        "totalUsd": 0.015276000593331679
+      },
+      "past24h": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 0.1637342487821666,
+        "totalUsd": 0.1637342487821666
+      },
+      "apr24hPct": 24.141069842359332,
+      "range": {
+        "status": "range_n/a",
+        "nearThreshold": 0.1,
+        "nearestEdge": null,
+        "margin": null,
+        "marginPct": null
+      },
+      "metricsQuality": "full",
+      "metricsReason": "full"
+    },
+    {
+      "index": 5,
+      "poolPair": "WETH/cbBTC",
+      "protocol": "PancakeSwap V3",
+      "chainName": "Base",
+      "tokenIdDecimal": "1880873",
+      "depositedUsd": 90.75844997578008,
+      "claimableNow": {
+        "feesUsd": 0.003102624329899547,
+        "emissionsUsd": 0.0032420494669979497,
+        "totalUsd": 0.006344673796897496
+      },
+      "past24h": {
+        "feesUsd": 0.0,
+        "emissionsUsd": 0.046990476358056775,
+        "totalUsd": 0.046990476358056775
+      },
+      "apr24hPct": 18.897991179077874,
+      "range": {
+        "status": "in_range",
+        "nearThreshold": 0.1,
+        "nearestEdge": "upper",
+        "margin": 0.14837663199947232,
+        "marginPct": 14.837663199947231
+      },
+      "metricsQuality": "full",
+      "metricsReason": "full"
+    },
+    {
+      "index": 6,
+      "poolPair": "USDC/WBNB",
+      "protocol": "PancakeSwap V3",
+      "chainName": "BSC",
+      "tokenIdDecimal": "6712822",
+      "depositedUsd": 29.81280786280685,
+      "claimableNow": {
+        "feesUsd": 0.18544205726741625,
+        "emissionsUsd": 0.02537449398071095,
+        "totalUsd": 0.2108165512481272
+      },
+      "past24h": {
+        "feesUsd": 0.02107269791068323,
+        "emissionsUsd": 0.002502837577977436,
+        "totalUsd": 0.02357553548866067
+      },
+      "apr24hPct": 28.86366991314646,
+      "range": {
+        "status": "in_range",
+        "nearThreshold": 0.1,
+        "nearestEdge": "lower",
+        "margin": 0.4530275096386181,
+        "marginPct": 45.30275096386181
+      },
+      "metricsQuality": "full",
+      "metricsReason": "full"
+    }
+  ],
+  "rangeReport": {
+    "outOfRange": [],
+    "nearOutOfRange": [
+      {
+        "poolPair": "WETH/msETH",
+        "protocol": "Aerodrome SlipStream",
+        "chainName": "Base",
+        "tokenIdDecimal": "59560704",
+        "nearestEdge": "upper",
+        "marginPct": 8.0184119559462
+      }
+    ],
+    "rangeNA": [
+      {
+        "poolPair": "msUSD/USDC (stable)",
+        "protocol": "Aerodrome V2",
+        "chainName": "Base",
+        "tokenIdDecimal": "75756290292185969698387349395835335828857380981",
+        "nearestEdge": null,
+        "marginPct": null
+      }
+    ],
+    "counts": {
+      "outOfRange": 0,
+      "nearOutOfRange": 1,
+      "rangeNA": 1
+    }
+  },
+  "tokenDistribution": {
+    "fees24h": [
+      {
+        "token": "USDC",
+        "amount": 0.010560768353209064,
+        "usd": 0.01055866116309955
+      },
+      {
+        "token": "WBNB",
+        "amount": 1.710703317252e-05,
+        "usd": 0.01050406934485407
+      }
+    ],
+    "emissions24h": [
+      {
+        "token": "AERO",
+        "amount": 8.98713903334301,
+        "usd": 3.282331520205426
+      },
+      {
+        "token": "Cake",
+        "amount": 0.030959208012063474,
+        "usd": 0.04949331393603421
+      }
+    ],
+    "combined24h": [
+      {
+        "token": "AERO",
+        "amount": 8.98713903334301,
+        "usd": 3.282331520205426
+      },
+      {
+        "token": "Cake",
+        "amount": 0.030959208012063474,
+        "usd": 0.04949331393603421
+      },
+      {
+        "token": "USDC",
+        "amount": 0.010560768353209064,
+        "usd": 0.01055866116309955
+      },
+      {
+        "token": "WBNB",
+        "amount": 1.710703317252e-05,
+        "usd": 0.01050406934485407
+      }
+    ],
+    "emissionsClaimableNow": [
+      {
+        "token": "AERO",
+        "amount": 1.3917226678125092,
+        "usd": 0.5076121219096299
+      },
+      {
+        "token": "Cake",
+        "amount": 0.01789987030419405,
+        "usd": 0.02865951714344648
+      }
+    ],
+    "limitations": [
+      "Claimable-now fees token split may be unavailable; only USD total can be reported in that case."
+    ]
+  },
+  "totals": {
+    "depositedUsd": 4436.079709747702,
+    "claimableNowUsd": 0.7254537042196968,
+    "fees24hUsd": 0.02107269791068323,
+    "emissions24hUsd": 3.33182483414146,
+    "combined24hUsd": 3.3528975320521432
+  },
+  "warnings": []
+}

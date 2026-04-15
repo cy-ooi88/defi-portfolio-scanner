@@ -1,0 +1,73 @@
+{
+  "owner": "0xbEadbf314A7B17140f5964249803d649D5491C8A",
+  "sourceFile": "cli_uniswap_positions_json\\vfat_output_bead.json",
+  "rowSource": "openRows",
+  "rowCount": 1,
+  "nearThreshold": 0.1,
+  "positions": [
+    {
+      "index": 1,
+      "poolPair": "WETH/USDC",
+      "protocol": "Uniswap V3",
+      "chainName": "Base",
+      "tokenIdDecimal": "344330",
+      "depositedUsd": 1157.6778045956996,
+      "claimableNow": {
+        "feesUsd": 995.1524107500818,
+        "emissionsUsd": 0.0,
+        "totalUsd": 995.1524107500818
+      },
+      "past24h": {
+        "feesUsd": null,
+        "emissionsUsd": null,
+        "totalUsd": 0.0
+      },
+      "apr24hPct": null,
+      "range": {
+        "status": "out_of_range",
+        "nearThreshold": 0.1,
+        "nearestEdge": null,
+        "margin": null,
+        "marginPct": null
+      },
+      "metricsQuality": "partial",
+      "metricsReason": "partial_python_cli_no_24h"
+    }
+  ],
+  "rangeReport": {
+    "outOfRange": [
+      {
+        "poolPair": "WETH/USDC",
+        "protocol": "Uniswap V3",
+        "chainName": "Base",
+        "tokenIdDecimal": "344330",
+        "nearestEdge": null,
+        "marginPct": null
+      }
+    ],
+    "nearOutOfRange": [],
+    "rangeNA": [],
+    "counts": {
+      "outOfRange": 1,
+      "nearOutOfRange": 0,
+      "rangeNA": 0
+    }
+  },
+  "tokenDistribution": {
+    "fees24h": [],
+    "emissions24h": [],
+    "combined24h": [],
+    "emissionsClaimableNow": [],
+    "limitations": [
+      "Claimable-now fees token split may be unavailable; only USD total can be reported in that case."
+    ]
+  },
+  "totals": {
+    "depositedUsd": 1157.6778045956996,
+    "claimableNowUsd": 995.1524107500818,
+    "fees24hUsd": 0.0,
+    "emissions24hUsd": 0.0,
+    "combined24hUsd": 0.0
+  },
+  "warnings": []
+}
