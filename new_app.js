@@ -3266,13 +3266,14 @@ function buildUnifiedSummaryTotals(openRows) {
   const uniquePools = new Set();
 
   for (const row of (openRows || [])) {
+    const positionType = row.positionType || "cl";
     if (Number.isFinite(row.currentPoolUsd)) {
       pooledUsd += row.currentPoolUsd;
     }
     if (Number.isFinite(row.vfatClaimableNowUsd)) {
       claimableUsd += row.vfatClaimableNowUsd;
     }
-    if ((row.positionType || "cl") === "cl") {
+    if (positionType === "cl") {
       clOpenCount += 1;
       if (typeof row.vfatInRange === "boolean") {
         rangeConsideredCount += 1;
@@ -3280,6 +3281,10 @@ function buildUnifiedSummaryTotals(openRows) {
           inRangeCount += 1;
         }
       }
+    } else if (positionType === "aerodrome_v2") {
+      // V2 LPs have no bounded CL tick range; count them as active/in-range in the top LP status.
+      rangeConsideredCount += 1;
+      inRangeCount += 1;
     }
     if (row.poolPair) {
       uniquePools.add(`${row.protocol || "unknown"}:${row.poolPair}:${Number.isFinite(row.poolFee) ? row.poolFee : "na"}`);
