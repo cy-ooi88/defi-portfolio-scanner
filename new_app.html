@@ -68,7 +68,6 @@
       <div class="section-head">
         <div>
           <h2 class="section-title" id="openSectionTitle" data-loading-field>Open LP positions (0)</h2>
-          <p class="note">Unified CL view from wallet-held + VFat-derived BSC LP positions (PancakeSwap V3 focus).</p>
         </div>
         <div class="chip-row">
           <span class="chip subtle" id="exchangeCountChip" data-loading-field>0 pools</span>
@@ -78,11 +77,6 @@
           <span class="chip neutral">BSC only</span>
         </div>
       </div>
-
-      <p class="note" id="openDedupeStatus" data-loading-field>
-        Duplicate policy: prefer VFat rows when `tokenContract + tokenIdHex` collide. This refresh merged 0 duplicates.
-      </p>
-      <p class="note vfat-error hidden" id="vfatErrorText"></p>
 
       <div class="cl-table-wrap">
         <table class="cl-table">
@@ -101,6 +95,7 @@
           <tbody id="openTableBody"></tbody>
         </table>
       </div>
+      <p class="note vfat-error hidden" id="vfatErrorText"></p>
 
       <div class="empty-state hidden" id="openEmpty">
         <h3>No open positions found</h3>
