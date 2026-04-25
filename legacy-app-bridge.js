@@ -235,6 +235,7 @@ const els = {
   totalClaimable: document.getElementById("totalClaimable"),
   totalIncomeDaily: document.getElementById("totalIncomeDaily"),
   incomeProjectionNote: document.getElementById("incomeProjectionNote"),
+  totalAverageApr: document.getElementById("totalAverageApr"),
   openCount: document.getElementById("openCount"),
   rangeSummary: document.getElementById("rangeSummary"),
   rangeSummaryNote: document.getElementById("rangeSummaryNote"),
@@ -3218,6 +3219,9 @@ function renderSummary(portfolio) {
     const emissions = Number.isFinite(row?.emissions24hUsd) ? row.emissions24hUsd : 0;
     return sum + fees + emissions;
   }, 0);
+  const averageAprPct = Number.isFinite(totals.pooledUsd) && totals.pooledUsd > 0
+    ? (incomeDailyUsd / totals.pooledUsd) * 365 * 100
+    : null;
   const incomeWeeklyUsd = incomeDailyUsd * 7;
   const incomeMonthlyUsd = incomeDailyUsd * 30;
   const incomeYearlyUsd = incomeDailyUsd * 365;
@@ -3232,6 +3236,11 @@ function renderSummary(portfolio) {
   }
   if (els.incomeProjectionNote) {
     els.incomeProjectionNote.textContent = `W ${formatUsd(incomeWeeklyUsd)} | M ${formatUsd(incomeMonthlyUsd)} | Y ${formatUsd(incomeYearlyUsd)}`;
+  }
+  if (els.totalAverageApr) {
+    els.totalAverageApr.textContent = Number.isFinite(averageAprPct)
+      ? formatPercent(averageAprPct, 1)
+      : "n/a";
   }
   if (els.openCount) {
     els.openCount.textContent = String(totals.openCount);
@@ -3451,6 +3460,9 @@ function clearDashboard() {
   }
   if (els.incomeProjectionNote) {
     els.incomeProjectionNote.textContent = "W $0.00 | M $0.00 | Y $0.00";
+  }
+  if (els.totalAverageApr) {
+    els.totalAverageApr.textContent = "n/a";
   }
   if (els.openCount) {
     els.openCount.textContent = "0";

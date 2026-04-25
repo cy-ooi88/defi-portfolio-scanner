@@ -117,7 +117,7 @@ body::before {
   --summary-value-row: 2.05rem;
   --summary-row-gap: 4px;
   display: grid;
-  grid-template-columns: minmax(230px, 1.4fr) repeat(4, minmax(126px, 1fr));
+  grid-template-columns: minmax(230px, 1.4fr) repeat(5, minmax(126px, 1fr));
   gap: 0;
   border-bottom: 1px solid var(--line-soft);
 }
