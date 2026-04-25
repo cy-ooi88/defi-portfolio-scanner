@@ -233,6 +233,8 @@ const els = {
   bannerChip: document.getElementById("bannerChip"),
   totalValue: document.getElementById("totalValue"),
   totalClaimable: document.getElementById("totalClaimable"),
+  totalIncomeDaily: document.getElementById("totalIncomeDaily"),
+  incomeProjectionNote: document.getElementById("incomeProjectionNote"),
   openCount: document.getElementById("openCount"),
   rangeSummary: document.getElementById("rangeSummary"),
   rangeSummaryNote: document.getElementById("rangeSummaryNote"),
@@ -3211,11 +3213,26 @@ async function fetchPortfolio(wallet, apiKey, onStatus = () => {}) {
 function renderSummary(portfolio) {
   const { owner, openRows, totals } = portfolio;
   const outOfRange = Math.max(0, totals.rangeConsideredCount - totals.inRangeCount);
+  const incomeDailyUsd = openRows.reduce((sum, row) => {
+    const fees = Number.isFinite(row?.fees24hUsd) ? row.fees24hUsd : 0;
+    const emissions = Number.isFinite(row?.emissions24hUsd) ? row.emissions24hUsd : 0;
+    return sum + fees + emissions;
+  }, 0);
+  const incomeWeeklyUsd = incomeDailyUsd * 7;
+  const incomeMonthlyUsd = incomeDailyUsd * 30;
+  const incomeYearlyUsd = incomeDailyUsd * 365;
+
   renderAccountBadge(owner);
   els.walletHeadline.textContent = shortenAddress(owner);
   els.walletSubline.textContent = `${totals.openCount} active position${totals.openCount === 1 ? "" : "s"} on Base + BSC`;
   els.totalValue.textContent = formatUsd(totals.pooledUsd);
   els.totalClaimable.textContent = formatUsd(totals.claimableUsd);
+  if (els.totalIncomeDaily) {
+    els.totalIncomeDaily.textContent = `${formatUsd(incomeDailyUsd)}/day`;
+  }
+  if (els.incomeProjectionNote) {
+    els.incomeProjectionNote.textContent = `W ${formatUsd(incomeWeeklyUsd)} | M ${formatUsd(incomeMonthlyUsd)} | Y ${formatUsd(incomeYearlyUsd)}`;
+  }
   if (els.openCount) {
     els.openCount.textContent = String(totals.openCount);
   }
@@ -3429,6 +3446,12 @@ function clearDashboard() {
   renderAccountBadge("");
   els.totalValue.textContent = "$0.00";
   els.totalClaimable.textContent = "$0.00";
+  if (els.totalIncomeDaily) {
+    els.totalIncomeDaily.textContent = "$0.00/day";
+  }
+  if (els.incomeProjectionNote) {
+    els.incomeProjectionNote.textContent = "W $0.00 | M $0.00 | Y $0.00";
+  }
   if (els.openCount) {
     els.openCount.textContent = "0";
   }
