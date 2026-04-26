@@ -2403,12 +2403,10 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
   const pendingNow1 = snapshotNow.claimable?.amount1 || 0n;
   const pendingStart0 = snapshot24h?.claimable?.amount0 || 0n;
   const pendingStart1 = snapshot24h?.claimable?.amount1 || 0n;
-  const pendingDelta0 = safePositive(pendingNow0 - pendingStart0);
-  const pendingDelta1 = safePositive(pendingNow1 - pendingStart1);
-  const rawFees0 = collect24h.amount0 + pendingDelta0;
-  const rawFees1 = collect24h.amount1 + pendingDelta1;
-  const fees24hRaw0 = adapter.feesMode === "none" ? 0n : rawFees0;
-  const fees24hRaw1 = adapter.feesMode === "none" ? 0n : rawFees1;
+  const rawFees0 = collect24h.amount0 + pendingNow0 - pendingStart0;
+  const rawFees1 = collect24h.amount1 + pendingNow1 - pendingStart1;
+  const fees24hRaw0 = adapter.feesMode === "none" ? 0n : safePositive(rawFees0);
+  const fees24hRaw1 = adapter.feesMode === "none" ? 0n : safePositive(rawFees1);
 
   const valuation = await calculateCurrentPoolUsd(snapshotNow, provider, apiKey);
   const token0Meta = valuation.token0Meta;
