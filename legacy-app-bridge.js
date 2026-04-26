@@ -222,6 +222,13 @@ const els = {
   downloadLogsButton: document.getElementById("downloadLogsButton"),
   settingsOverlay: document.getElementById("settingsOverlay"),
   settingsCloseButton: document.getElementById("settingsCloseButton"),
+  increasePositionOverlay: document.getElementById("increasePositionOverlay"),
+  increasePositionCloseButton: document.getElementById("increasePositionCloseButton"),
+  increasePositionSubtitle: document.getElementById("increasePositionSubtitle"),
+  increasePositionUsdInput: document.getElementById("increasePositionUsdInput"),
+  increasePositionAssetSelect: document.getElementById("increasePositionAssetSelect"),
+  increasePositionResults: document.getElementById("increasePositionResults"),
+  increasePositionNote: document.getElementById("increasePositionNote"),
   walletInput: document.getElementById("walletInput"),
   alchemyInput: document.getElementById("alchemyInput"),
   statusText: document.getElementById("statusText"),
@@ -250,6 +257,39 @@ const els = {
   vfatErrorText: document.getElementById("vfatErrorText"),
   loadingFields: Array.from(document.querySelectorAll("[data-loading-field]"))
 };
+
+const increasePositionRows = new Map();
+let activeIncreasePositionRow = null;
+let activeIncreaseFundingOptions = [];
+const fundingAssetPriceCache = new Map();
+
+const DEFAULT_INCREASE_FUNDING_ASSETS = [
+  {
+    id: "usdc",
+    label: "USDC",
+    symbol: "USDC",
+    aliases: ["USDC"],
+    fixedPriceUsd: 1
+  },
+  {
+    id: "weth",
+    label: "WETH",
+    symbol: "WETH",
+    aliases: ["WETH", "ETH"],
+    network: "base-mainnet",
+    address: "0x4200000000000000000000000000000000000006"
+  },
+  {
+    id: "btc",
+    label: "cbBTC/WBTC",
+    symbol: "BTC",
+    aliases: ["BTC", "CBBTC", "WBTC"],
+    priceCandidates: [
+      { network: "base-mainnet", address: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf" },
+      { network: "base-mainnet", address: "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c" }
+    ]
+  }
+];
 
 function setLoadingState(isLoading) {
   for (const field of els.loadingFields) {
@@ -1684,7 +1724,11 @@ async function calculateCurrentPoolUsd(snapshot, provider, apiKey) {
     currentPoolUsd: Number.isFinite(currentPoolUsd) ? currentPoolUsd : null,
     token0Meta,
     token1Meta,
-    prices
+    prices,
+    pooled0,
+    pooled1,
+    price0,
+    price1
   };
 }
 
@@ -2010,6 +2054,12 @@ async function buildAerodromeV2Row(vfatContract, gaugeAddress, blockWindow, apiK
           poolStable: poolSnapshot.stable,
           poolToken0: token0Meta.address,
           poolToken1: token1Meta.address,
+          token0Symbol: token0Meta.symbol,
+          token1Symbol: token1Meta.symbol,
+          token0Price,
+          token1Price,
+          pooled0,
+          pooled1,
           currentPoolUsd
         };
       }
@@ -2647,6 +2697,12 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
   return {
     ...row,
     currentPoolUsd,
+    pooled0: valuation.pooled0,
+    pooled1: valuation.pooled1,
+    token0Price: valuation.price0,
+    token1Price: valuation.price1,
+    token0Symbol: valuation.token0Meta?.symbol || null,
+    token1Symbol: valuation.token1Meta?.symbol || null,
     fees24hToken0,
     fees24hToken1,
     fees24hUsd,
@@ -3347,6 +3403,12 @@ function normalizeStandardOpenPositionRow(position, owner) {
     poolFee: Number(position.position.fee),
     poolToken0: position.token0.address,
     poolToken1: position.token1.address,
+    token0Symbol: position.token0.symbol,
+    token1Symbol: position.token1.symbol,
+    token0Price: position.token0Price,
+    token1Price: position.token1Price,
+    pooled0: position.pooled0,
+    pooled1: position.pooled1,
     poolTickLower: Number(position.position.tickLower),
     poolTickUpper: Number(position.position.tickUpper),
     poolStable: null,
@@ -3544,6 +3606,301 @@ function buildRangeCurrentDisplay(row) {
   `;
 }
 
+function getIncreasePositionId(row) {
+  const identity = row.tokenKey || `${row.tokenContract || "position"}:${row.tokenIdHex || row.tokenIdDecimal || row.poolPair || "unknown"}`;
+  return `increase-${String(identity).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function getIncreasePositionComposition(row) {
+  const token0Symbol = row.token0Symbol || String(row.poolPair || "Token0/Token1").split("/")[0] || "Token0";
+  const token1Symbol = row.token1Symbol || String(row.poolPair || "Token0/Token1").split("/")[1]?.split(" ")[0] || "Token1";
+  const token0Price = Number(row.token0Price);
+  const token1Price = Number(row.token1Price);
+  const pooled0 = Number(row.pooled0);
+  const pooled1 = Number(row.pooled1);
+  const token0Usd = Number.isFinite(pooled0) && Number.isFinite(token0Price) ? pooled0 * token0Price : null;
+  const token1Usd = Number.isFinite(pooled1) && Number.isFinite(token1Price) ? pooled1 * token1Price : null;
+  const totalUsd = [token0Usd, token1Usd].filter((value) => Number.isFinite(value)).reduce((sum, value) => sum + value, 0);
+
+  if (!(totalUsd > 0) || !(token0Price > 0) || !(token1Price > 0)) {
+    return null;
+  }
+
+  return {
+    token0Symbol,
+    token1Symbol,
+    token0Price,
+    token1Price,
+    token0Share: token0Usd / totalUsd,
+    token1Share: token1Usd / totalUsd
+  };
+}
+
+function getRowPriceNetwork(row) {
+  const chainKey = String(row.chainName || "").toLowerCase();
+  if (chainKey.includes("bsc") || chainKey.includes("bnb")) {
+    return CHAIN_CONFIGS.bsc.priceNetwork;
+  }
+  if (chainKey.includes("base")) {
+    return CHAIN_CONFIGS.base.priceNetwork;
+  }
+  return CHAIN_PRICE_NETWORK;
+}
+
+function normalizeFundingSymbol(symbol) {
+  return String(symbol || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^W?BTC$/, "BTC");
+}
+
+function defaultFundingMatchesSymbol(asset, symbol) {
+  const normalized = normalizeFundingSymbol(symbol);
+  return (asset.aliases || [asset.symbol]).some((alias) => normalizeFundingSymbol(alias) === normalized);
+}
+
+function getIncreasePairAssetOptions(row) {
+  const pairLabel = String(row.poolPair || "");
+  const fallbackSymbols = pairLabel.replace(/\s*\(.+$/, "").split("/");
+  const symbols = [
+    row.token0Symbol || fallbackSymbols[0],
+    row.token1Symbol || fallbackSymbols[1]?.split(" ")[0]
+  ];
+  const addresses = [row.poolToken0, row.poolToken1];
+  const prices = [row.token0Price, row.token1Price];
+  const network = getRowPriceNetwork(row);
+
+  return symbols
+    .map((symbol, index) => {
+      const cleanSymbol = String(symbol || "").trim();
+      if (!cleanSymbol) {
+        return null;
+      }
+      return {
+        id: `pair-${index}-${cleanSymbol.toLowerCase()}`,
+        label: cleanSymbol,
+        symbol: cleanSymbol,
+        address: addresses[index],
+        network,
+        priceUsd: Number.isFinite(Number(prices[index])) ? Number(prices[index]) : null
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildIncreaseFundingOptions(row) {
+  const options = DEFAULT_INCREASE_FUNDING_ASSETS.map((asset) => ({ ...asset }));
+  const pairOptions = getIncreasePairAssetOptions(row);
+  for (const pairAsset of pairOptions) {
+    const matchingDefault = options.find((asset) => defaultFundingMatchesSymbol(asset, pairAsset.symbol));
+    if (matchingDefault) {
+      if (!Number.isFinite(Number(matchingDefault.priceUsd)) && Number.isFinite(Number(pairAsset.priceUsd))) {
+        matchingDefault.priceUsd = Number(pairAsset.priceUsd);
+      }
+      continue;
+    }
+    options.push(pairAsset);
+  }
+  return options;
+}
+
+function renderIncreaseFundingOptions(row) {
+  activeIncreaseFundingOptions = buildIncreaseFundingOptions(row);
+  els.increasePositionAssetSelect.innerHTML = activeIncreaseFundingOptions
+    .map((asset) => `<option value="${escapeHtml(asset.id)}">${escapeHtml(asset.label)}</option>`)
+    .join("");
+}
+
+async function fetchFundingPriceByAddress(network, address, apiKey) {
+  if (!network || !address || !apiKey) {
+    return null;
+  }
+
+  let normalizedAddress = null;
+  try {
+    normalizedAddress = ethers.getAddress(address);
+  } catch {
+    return null;
+  }
+
+  const cacheKey = `${network}:${normalizedAddress.toLowerCase()}`;
+  if (fundingAssetPriceCache.has(cacheKey)) {
+    return fundingAssetPriceCache.get(cacheKey);
+  }
+
+  let price = null;
+  try {
+    const response = await fetch(`${PRICE_API_BASE}/${apiKey}/tokens/by-address`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        addresses: [{ network, address: normalizedAddress }]
+      })
+    });
+    const payload = await response.json().catch(() => null);
+    const value = payload?.data?.[0]?.prices?.find((entry) => entry.currency === "usd")?.value;
+    price = value ? Number(value) : null;
+  } catch {
+    price = null;
+  }
+
+  fundingAssetPriceCache.set(cacheKey, Number.isFinite(price) ? price : null);
+  return fundingAssetPriceCache.get(cacheKey);
+}
+
+async function resolveFundingAssetPrice(asset) {
+  if (!asset) {
+    return null;
+  }
+  if (Number.isFinite(Number(asset.fixedPriceUsd))) {
+    return Number(asset.fixedPriceUsd);
+  }
+  if (Number.isFinite(Number(asset.priceUsd))) {
+    return Number(asset.priceUsd);
+  }
+
+  const apiKey = els.alchemyInput.value.trim();
+  if (asset.priceCandidates?.length) {
+    for (const candidate of asset.priceCandidates) {
+      const price = await fetchFundingPriceByAddress(candidate.network, candidate.address, apiKey);
+      if (Number.isFinite(price) && price > 0) {
+        asset.priceUsd = price;
+        return price;
+      }
+    }
+    return null;
+  }
+
+  const price = await fetchFundingPriceByAddress(asset.network, asset.address, apiKey);
+  if (Number.isFinite(price) && price > 0) {
+    asset.priceUsd = price;
+    return price;
+  }
+  return null;
+}
+
+function getSelectedFundingAsset() {
+  const selectedId = els.increasePositionAssetSelect.value;
+  return activeIncreaseFundingOptions.find((asset) => asset.id === selectedId) || activeIncreaseFundingOptions[0] || null;
+}
+
+function canCalculateIncreasePosition(row) {
+  return Boolean(getIncreasePositionComposition(row));
+}
+
+function buildIncreasePositionButton(row) {
+  const rowId = getIncreasePositionId(row);
+  increasePositionRows.set(rowId, row);
+  const disabled = canCalculateIncreasePosition(row) ? "" : " disabled";
+  const title = disabled
+    ? "Token ratio unavailable for this position"
+    : "Calculate token amounts to add";
+  return `
+    <button class="increase-position-button" type="button" data-increase-position-id="${escapeHtml(rowId)}"${disabled} title="${escapeHtml(title)}">
+      <span aria-hidden="true">+</span>
+      <span>Increase</span>
+    </button>
+  `;
+}
+
+function buildRangeCurrentCell(row, rangeCurrentDisplay) {
+  return `
+    <div class="range-current-stack">
+      ${rangeCurrentDisplay}
+      ${buildIncreasePositionButton(row)}
+    </div>
+  `;
+}
+
+function calculateIncreasePositionAmounts(row, usdAmount) {
+  const composition = getIncreasePositionComposition(row);
+  if (!composition || !(usdAmount > 0)) {
+    return null;
+  }
+
+  const token0Usd = usdAmount * composition.token0Share;
+  const token1Usd = usdAmount * composition.token1Share;
+  return {
+    ...composition,
+    usdAmount,
+    token0Usd,
+    token1Usd,
+    token0Amount: token0Usd / composition.token0Price,
+    token1Amount: token1Usd / composition.token1Price
+  };
+}
+
+async function renderIncreasePositionResults() {
+  if (!activeIncreasePositionRow) {
+    return;
+  }
+
+  const fundingAmount = Number(els.increasePositionUsdInput.value);
+  const fundingAsset = getSelectedFundingAsset();
+  const fundingPriceUsd = await resolveFundingAssetPrice(fundingAsset);
+  const usdAmount = Number.isFinite(fundingPriceUsd) ? fundingAmount * fundingPriceUsd : null;
+  const result = calculateIncreasePositionAmounts(activeIncreasePositionRow, usdAmount);
+  if (!result) {
+    const message = fundingAmount > 0 && !Number.isFinite(fundingPriceUsd)
+      ? `Price unavailable for ${fundingAsset?.label || "selected asset"}.`
+      : "Enter an amount to calculate the matching token split.";
+    els.increasePositionResults.innerHTML = `
+      <div class="increase-empty">${escapeHtml(message)}</div>
+    `;
+    return;
+  }
+
+  const token0Share = formatPercent(result.token0Share * 100, 2);
+  const token1Share = formatPercent(result.token1Share * 100, 2);
+  const fundingSummary = `${formatToken(fundingAmount, 8)} ${fundingAsset?.label || "asset"} = ${formatUsd(usdAmount)}`;
+  els.increasePositionResults.innerHTML = `
+    <div class="increase-conversion">${escapeHtml(fundingSummary)}</div>
+    <div class="increase-result-row">
+      <div>
+        <div class="increase-token">${escapeHtml(result.token0Symbol)}</div>
+        <div class="increase-share">${escapeHtml(token0Share)} of add</div>
+      </div>
+      <div class="increase-amount">
+        <strong>${escapeHtml(formatToken(result.token0Amount, 8))}</strong>
+        <span>${escapeHtml(formatUsd(result.token0Usd))}</span>
+      </div>
+    </div>
+    <div class="increase-result-row">
+      <div>
+        <div class="increase-token">${escapeHtml(result.token1Symbol)}</div>
+        <div class="increase-share">${escapeHtml(token1Share)} of add</div>
+      </div>
+      <div class="increase-amount">
+        <strong>${escapeHtml(formatToken(result.token1Amount, 8))}</strong>
+        <span>${escapeHtml(formatUsd(result.token1Usd))}</span>
+      </div>
+    </div>
+  `;
+}
+
+function openIncreasePosition(row) {
+  activeIncreasePositionRow = row;
+  const composition = getIncreasePositionComposition(row);
+  renderIncreaseFundingOptions(row);
+  els.increasePositionSubtitle.textContent = row.poolPair || "Selected position";
+  els.increasePositionUsdInput.value = "";
+  els.increasePositionNote.textContent = composition
+    ? `Funding asset is converted to USD first, then split by the position's current token USD ratio: ${formatPercent(composition.token0Share * 100, 2)} ${composition.token0Symbol} / ${formatPercent(composition.token1Share * 100, 2)} ${composition.token1Symbol}.`
+    : "Token prices or current pooled amounts are unavailable for this position.";
+  els.increasePositionOverlay.classList.remove("hidden");
+  els.increasePositionOverlay.setAttribute("aria-hidden", "false");
+  renderIncreasePositionResults();
+  window.setTimeout(() => els.increasePositionUsdInput.focus(), 0);
+}
+
+function closeIncreasePosition() {
+  activeIncreasePositionRow = null;
+  els.increasePositionOverlay.classList.add("hidden");
+  els.increasePositionOverlay.setAttribute("aria-hidden", "true");
+}
+
 function buildFeesEmissionsDisplay(row, quality) {
   const hasFees = Number.isFinite(row.fees24hUsd);
   const hasEmissions = Number.isFinite(row.emissions24hUsd);
@@ -3592,6 +3949,7 @@ function renderCurrentClRow(row) {
   const safePoolPair = escapeHtml(row.poolPair || "Unknown/Unknown");
   const safeFee = Number.isFinite(row.poolFee) ? escapeHtml(formatFeeTier(row.poolFee)) : "n/a";
   const rangeCurrentDisplay = buildRangeCurrentDisplay(row);
+  const rangeCurrentCell = buildRangeCurrentCell(row, rangeCurrentDisplay);
   const safeAvailableToClaim = Number.isFinite(row.vfatClaimableNowUsd)
     ? escapeHtml(formatUsd(row.vfatClaimableNowUsd))
     : "n/a";
@@ -3614,7 +3972,7 @@ function renderCurrentClRow(row) {
       </div>
     </td>
     <td class="mono cl-cell-num">${safeFee}</td>
-    <td class="mono range-price-cell">${rangeCurrentDisplay}</td>
+    <td class="mono range-price-cell">${rangeCurrentCell}</td>
     <td class="mono cl-cell-num">${safeAvailableToClaim}</td>
     <td class="mono cl-cell-num">${feesEmissionsDisplay}</td>
     <td class="mono cl-cell-num">${safeTotalDeposited}</td>
@@ -3625,6 +3983,7 @@ function renderCurrentClRow(row) {
 
 function renderOpenRowsTable(portfolio) {
   els.openTableBody.innerHTML = "";
+  increasePositionRows.clear();
 
   if (!portfolio.openRows.length) {
     els.openEmpty.classList.remove("hidden");
@@ -3782,16 +4141,50 @@ els.settingsCloseButton.addEventListener("click", () => {
   closeSettings();
 });
 
+els.increasePositionCloseButton.addEventListener("click", () => {
+  closeIncreasePosition();
+});
+
 els.settingsOverlay.addEventListener("click", (event) => {
   if (event.target === els.settingsOverlay) {
     closeSettings();
   }
 });
 
+els.increasePositionOverlay.addEventListener("click", (event) => {
+  if (event.target === els.increasePositionOverlay) {
+    closeIncreasePosition();
+  }
+});
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !els.settingsOverlay.classList.contains("hidden")) {
+  if (event.key !== "Escape") {
+    return;
+  }
+  if (!els.increasePositionOverlay.classList.contains("hidden")) {
+    closeIncreasePosition();
+  } else if (!els.settingsOverlay.classList.contains("hidden")) {
     closeSettings();
   }
+});
+
+els.openTableBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-increase-position-id]");
+  if (!button || button.disabled) {
+    return;
+  }
+  const row = increasePositionRows.get(button.dataset.increasePositionId);
+  if (row) {
+    openIncreasePosition(row);
+  }
+});
+
+els.increasePositionUsdInput.addEventListener("input", () => {
+  renderIncreasePositionResults();
+});
+
+els.increasePositionAssetSelect.addEventListener("change", () => {
+  renderIncreasePositionResults();
 });
 
 els.walletInput.addEventListener("change", () => {

@@ -148,6 +148,37 @@
     </section>
   </div>
 
+  <div class="increase-overlay hidden" id="increasePositionOverlay" aria-hidden="true">
+    <section class="increase-panel" role="dialog" aria-modal="true" aria-labelledby="increasePositionTitle">
+      <div class="settings-head">
+        <div>
+          <h2 id="increasePositionTitle">Position Increase Calculator</h2>
+          <p class="note increase-subtitle" id="increasePositionSubtitle"></p>
+        </div>
+        <button class="icon-button" id="increasePositionCloseButton" type="button" aria-label="Close increase position">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.7 5.3a1 1 0 0 0-1.4 1.4L10.6 12l-5.3 5.3a1 1 0 1 0 1.4 1.4l5.3-5.3 5.3 5.3a1 1 0 1 0 1.4-1.4L13.4 12l5.3-5.3a1 1 0 0 0-1.4-1.4L12 10.6 6.7 5.3Z" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="increase-input-grid">
+        <label class="field">
+          <span class="field-label">amount to add</span>
+          <input id="increasePositionUsdInput" name="increaseAmount" type="number" min="0" step="0.000001" inputmode="decimal" placeholder="1000">
+        </label>
+
+        <label class="field">
+          <span class="field-label">asset</span>
+          <select id="increasePositionAssetSelect" name="increaseAsset"></select>
+        </label>
+      </div>
+
+      <div class="increase-results" id="increasePositionResults"></div>
+      <p class="note increase-note" id="increasePositionNote"></p>
+    </section>
+  </div>
+
   <script type="module" src="./main.js?v=20260426a"></script>
 </body>
 </html>
