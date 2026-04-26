@@ -1063,6 +1063,187 @@ async function fetchClTransfersForVfatContract(vfatContract, apiKey) {
   return rows;
 }
 
+function mapWalletClTransferRow(wallet, transfer) {
+  const tokenContractRaw = transfer.rawContract?.address;
+  if (!tokenContractRaw || !transfer.erc721TokenId) {
+    return null;
+  }
+
+  const tokenContract = ethers.getAddress(tokenContractRaw);
+  const tokenContractLower = tokenContract.toLowerCase();
+  const protocol = CL_PROTOCOL_BY_MANAGER.get(tokenContractLower);
+  if (protocol !== "Aerodrome SlipStream") {
+    return null;
+  }
+
+  const walletAddress = ethers.getAddress(wallet);
+  const walletLower = walletAddress.toLowerCase();
+  const from = normalizeAddressOrZero(transfer.from);
+  const to = normalizeAddressOrZero(transfer.to);
+  const fromLower = from.toLowerCase();
+  const toLower = to.toLowerCase();
+  const tokenIdHex = normalizeTokenIdHex(transfer.erc721TokenId);
+  const tokenIdDecimal = tokenIdToDecimal(tokenIdHex);
+  const direction = fromLower === walletLower && toLower !== walletLower
+    ? "out"
+    : toLower === walletLower && fromLower !== walletLower
+      ? "in"
+      : "self";
+
+  return {
+    source: "aerodrome_staked",
+    positionType: "cl",
+    protocol,
+    protocolDisplay: "Aerodrome SlipStream (Staked)",
+    tokenContract,
+    tokenContractLower,
+    tokenIdHex,
+    tokenIdDecimal,
+    tokenKey: `${tokenContractLower}:${tokenIdHex.toLowerCase()}`,
+    direction,
+    action: direction === "out" ? "staked_or_sent" : direction === "in" ? "received_or_unstaked" : "self",
+    txHash: transfer.hash || "",
+    blockNumHex: transfer.blockNum || "0x0",
+    blockNumber: parseBlockNumber(transfer.blockNum),
+    blockTimestamp: transfer.metadata?.blockTimestamp || null,
+    from,
+    to,
+    counterparty: direction === "out" ? to : direction === "in" ? from : walletAddress,
+    rewardAccount: walletAddress,
+    vfatContract: walletAddress,
+    sortRef: transfer.uniqueId || `${transfer.hash || ""}:${transfer.erc721TokenId}`
+  };
+}
+
+async function fetchAerodromeSlipstreamTransferRowsForWallet(wallet, apiKey) {
+  const normalizedWallet = ethers.getAddress(wallet);
+  const slipstreamManager = CL_POSITION_MANAGERS.find((item) => item.protocol === "Aerodrome SlipStream");
+  if (!slipstreamManager?.address) {
+    return [];
+  }
+
+  const managerAddress = ethers.getAddress(slipstreamManager.address);
+  const [outbound, inbound] = await Promise.all([
+    fetchTransfersByAddress(apiKey, "fromAddress", normalizedWallet, [managerAddress]),
+    fetchTransfersByAddress(apiKey, "toAddress", normalizedWallet, [managerAddress])
+  ]);
+
+  const rows = [];
+  const seen = new Set();
+  for (const transfer of [...outbound, ...inbound]) {
+    try {
+      const row = mapWalletClTransferRow(normalizedWallet, transfer);
+      if (!row) {
+        continue;
+      }
+      const dedupeKey = transfer.uniqueId || `${row.txHash}:${row.tokenContractLower}:${row.tokenIdHex}:${row.from}:${row.to}`;
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+      seen.add(dedupeKey);
+      rows.push(row);
+    } catch {
+      // Ignore malformed transfer rows and continue.
+    }
+  }
+
+  rows.sort(compareClRowsDesc);
+  return rows;
+}
+
+async function buildAerodromeSlipstreamStakedRows(wallet, transferRows, apiKey, provider, onStatus = () => {}) {
+  const rowsByToken = new Map();
+  for (const row of transferRows) {
+    const list = rowsByToken.get(row.tokenKey) || [];
+    list.push(row);
+    rowsByToken.set(row.tokenKey, list);
+  }
+
+  const latestRows = [];
+  for (const rows of rowsByToken.values()) {
+    rows.sort(compareClRowsAsc);
+    const latest = rows[rows.length - 1];
+    if (latest.to.toLowerCase() === ZeroAddress.toLowerCase()) {
+      continue;
+    }
+    latestRows.push(latest);
+  }
+
+  if (!latestRows.length) {
+    return [];
+  }
+
+  onStatus("Validating wallet-staked Aerodrome SlipStream positions...");
+  const validations = await Promise.allSettled(
+    latestRows.map((row) => fetchLiveNftState(row.tokenContract, row.tokenIdHex, apiKey, provider))
+  );
+
+  const filteredRows = [];
+  for (let i = 0; i < latestRows.length; i += 1) {
+    const row = latestRows[i];
+    const validation = validations[i];
+    if (validation.status !== "fulfilled") {
+      continue;
+    }
+
+    const liveOwner = validation.value.ownerAddress;
+    const liquidity = validation.value.liquidity;
+    if (!liveOwner || liveOwner.toLowerCase() === ZeroAddress.toLowerCase() || !liquidity || liquidity <= 0n) {
+      continue;
+    }
+
+    const liveOwnerLower = liveOwner.toLowerCase();
+    const walletLower = ethers.getAddress(wallet).toLowerCase();
+    if (liveOwnerLower === walletLower) {
+      continue;
+    }
+    if (row.to.toLowerCase() !== liveOwnerLower) {
+      continue;
+    }
+    if (!(await isAerodromeGauge(liveOwner, provider))) {
+      continue;
+    }
+
+    filteredRows.push({
+      ...row,
+      currentOwner: liveOwner,
+      ownerScope: "aerodrome_gauge",
+      ownerCheck: "confirmed",
+      ownerResolved: liveOwnerLower,
+      liveLiquidity: liquidity.toString(),
+      adapterType: "aerodrome_clgauge",
+      poolPair: validation.value.pairLabel,
+      poolFee: validation.value.fee,
+      poolToken0: validation.value.token0Address,
+      poolToken1: validation.value.token1Address,
+      poolTickLower: validation.value.tickLower,
+      poolTickUpper: validation.value.tickUpper,
+      poolRangeLowerPrice: validation.value.rangeLowerPrice,
+      poolRangeUpperPrice: validation.value.rangeUpperPrice,
+      poolCurrentPrice: validation.value.currentPrice,
+      poolStable: null
+    });
+  }
+
+  filteredRows.sort(compareClRowsDesc);
+  return filteredRows;
+}
+
+async function fetchAerodromeSlipstreamStakedRows(wallet, apiKey, provider, onStatus = () => {}) {
+  if (ACTIVE_CHAIN_KEY !== "base") {
+    return [];
+  }
+
+  const transferRows = await fetchAerodromeSlipstreamTransferRowsForWallet(wallet, apiKey);
+  const currentRows = await buildAerodromeSlipstreamStakedRows(wallet, transferRows, apiKey, provider, onStatus);
+  if (!currentRows.length) {
+    return [];
+  }
+
+  onStatus("Computing 24h fees, emissions, and APR for wallet-staked Aerodrome SlipStream positions...");
+  return enrichCurrentRowsWith24hMetrics(currentRows, apiKey, provider, onStatus);
+}
+
 function padTokenIdToWord(tokenIdHex) {
   const normalized = normalizeTokenIdHex(tokenIdHex).slice(2);
   return normalized.padStart(64, "0");
@@ -1946,10 +2127,11 @@ async function fetchVFatAerodromeV2Rows(vfatContracts, apiKey, provider, onStatu
 }
 
 function getClaimScopeKey(row) {
-  if (!row?.protocol || !row?.currentOwner || !row?.vfatContract) {
+  const rewardAccount = row?.rewardAccount || row?.vfatContract;
+  if (!row?.protocol || !row?.currentOwner || !rewardAccount) {
     return null;
   }
-  return `${row.protocol}:${row.currentOwner.toLowerCase()}:${row.vfatContract.toLowerCase()}`;
+  return `${row.protocol}:${row.currentOwner.toLowerCase()}:${rewardAccount.toLowerCase()}`;
 }
 
 function buildClaimScopeCounts(rows) {
@@ -2059,9 +2241,10 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
   }
 
   const gaugeAddress = ethers.getAddress(row.currentOwner);
+  const rewardAccount = ethers.getAddress(row.rewardAccount || row.vfatContract);
   const tokenWord = padTokenIdToWord(row.tokenIdHex);
   const tokenTopic = tokenIdToTopic(row.tokenIdHex).toLowerCase();
-  const earnedData = `${EARNED_SELECTOR}${encodeAddressWord(row.vfatContract)}${tokenWord}`;
+  const earnedData = `${EARNED_SELECTOR}${encodeAddressWord(rewardAccount)}${tokenWord}`;
 
   let pendingNow;
   let pendingStart;
@@ -2112,7 +2295,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
   try {
     rewardTransfers = await fetchErc20TransfersInWindow(apiKey, {
       fromAddress: gaugeAddress,
-      toAddress: row.vfatContract,
+      toAddress: rewardAccount,
       contractAddresses: [rewardToken],
       fromBlockTag: blockWindow.fromBlockTag,
       toBlockTag: blockWindow.toBlockTag
@@ -2619,6 +2802,16 @@ async function buildCurrentOwnedRows(historyRows, apiKey, provider, onStatus = (
   return filteredRows;
 }
 
+function isActiveVfatManagedClRow(row) {
+  if (row.ownerScope === "vfat") {
+    return true;
+  }
+  if (row.ownerScope !== "external") {
+    return false;
+  }
+  return row.adapterType === "aerodrome_clgauge" || row.adapterType === "pancake_masterchef";
+}
+
 async function fetchVFatClDataForWallet(wallet, apiKey, provider, onStatus = () => {}) {
   let directDeployedContracts = [];
   let factoryDeployedContracts = [];
@@ -2668,16 +2861,17 @@ async function fetchVFatClDataForWallet(wallet, apiKey, provider, onStatus = () 
   }
 
   const currentOwnedRows = await buildCurrentOwnedRows(vfatClHistoryRows, apiKey, provider, onStatus);
+  const vfatOwnedRows = currentOwnedRows.filter(isActiveVfatManagedClRow);
   onStatus("Computing 24h fees, emissions, and APR for active CL positions...");
-  const vfatClCurrentRows = await enrichCurrentRowsWith24hMetrics(currentOwnedRows, apiKey, provider, onStatus);
+  const vfatClCurrentRows = await enrichCurrentRowsWith24hMetrics(vfatOwnedRows, apiKey, provider, onStatus);
   const vfatV2CurrentRows = ENABLE_AERODROME_V2_PATHS
     ? await fetchVFatAerodromeV2Rows(identifiedVfatContracts, apiKey, provider, onStatus)
     : [];
   const vfatClCurrentTokenCount = vfatClCurrentRows.length;
   const vfatV2CurrentTokenCount = vfatV2CurrentRows.length;
   const vfatClOwnedByVfatCount = vfatClCurrentRows.filter((row) => row.ownerScope === "vfat").length;
-  const vfatClExternalizedCount = vfatClCurrentRows.filter((row) => row.ownerScope === "external").length;
-  const vfatClUncertainCount = vfatClCurrentRows.filter((row) => row.ownerCheck !== "confirmed").length;
+  const vfatClExternalizedCount = currentOwnedRows.filter((row) => row.ownerScope === "external").length;
+  const vfatClUncertainCount = currentOwnedRows.filter((row) => row.ownerCheck !== "confirmed").length;
 
   return {
     directDeployedContracts,
@@ -3176,6 +3370,7 @@ const portfolioFacade = createPortfolioFacade({
     enrichValues,
     normalizeStandardOpenPositionRow,
     enrichCurrentRowsWith24hMetrics,
+    fetchAerodromeSlipstreamStakedRows,
     fetchVFatClDataForWallet,
     buildVfatContractHealthNote,
     delay,

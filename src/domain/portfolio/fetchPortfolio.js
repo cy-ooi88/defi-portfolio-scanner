@@ -17,6 +17,7 @@ export function createPortfolioFacade({
     enrichValues,
     normalizeStandardOpenPositionRow,
     enrichCurrentRowsWith24hMetrics,
+    fetchAerodromeSlipstreamStakedRows,
     fetchVFatClDataForWallet,
     buildVfatContractHealthNote,
     delay,
@@ -53,6 +54,10 @@ export function createPortfolioFacade({
       const key = normalizePositionIdentityKey(row.tokenContract, row.tokenIdHex);
       if (mergedByKey.has(key)) {
         dedupeCount += 1;
+        const existing = mergedByKey.get(key);
+        if ((existing?.source || "standard") !== "vfat" && row.ownerCheck !== "confirmed") {
+          continue;
+        }
       }
       mergedByKey.set(key, row);
     }
@@ -182,6 +187,10 @@ export function createPortfolioFacade({
     onStatus("Computing 24h fees, emissions, and APR for wallet-held CL positions...");
     const standardRowsEnriched = await enrichCurrentRowsWith24hMetrics(standardRowsCurrent, apiKey, provider, onStatus);
 
+    const aerodromeSlipstreamStakedRows = typeof fetchAerodromeSlipstreamStakedRows === "function"
+      ? await fetchAerodromeSlipstreamStakedRows(owner, apiKey, provider, onStatus)
+      : [];
+
     const vfatData = {
       vfatContracts: [],
       vfatClCurrentRows: [],
@@ -220,7 +229,10 @@ export function createPortfolioFacade({
         : vfatError;
     }
 
-    const standardRows = annotateProtocolDisplay(standardRowsEnriched, { isVfat: false });
+    const standardRows = annotateProtocolDisplay([
+      ...standardRowsEnriched,
+      ...aerodromeSlipstreamStakedRows
+    ], { isVfat: false });
     const vfatRows = annotateProtocolDisplay([
       ...(vfatData.vfatClCurrentRows || []),
       ...(vfatData.vfatV2CurrentRows || [])

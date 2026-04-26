@@ -20,7 +20,7 @@ async function start() {
     if (!window.ethers) {
       throw new Error("window.ethers is missing. The ethers CDN script did not load.");
     }
-    const { bootApp } = await import("./legacy-app-bridge.js?v=20260416e");
+    const { bootApp } = await import("./legacy-app-bridge.js?v=20260426a");
     await bootApp();
   } catch (error) {
     showBootFailure(error);
