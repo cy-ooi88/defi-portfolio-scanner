@@ -1445,11 +1445,13 @@ async function fetchClaimableSnapshotAtBlock(row, blockTag, apiKey, provider) {
       return null;
     }
 
+    const feeGrowthInside = getFeeGrowthInside(position, poolState);
     const claimable = getClaimableAmounts(position, poolState);
     return {
       position,
       poolAddress,
       poolState,
+      feeGrowthInside,
       claimable
     };
   } catch {
@@ -1862,8 +1864,7 @@ async function buildAerodromeV2Row(vfatContract, gaugeAddress, blockWindow, apiK
         }
       }
 
-      const pendingDelta = safePositive(pendingNow - pendingStart);
-      const emissionsRaw = pendingDelta + realizedReward;
+      const emissionsRaw = safePositive(realizedReward + pendingNow - pendingStart);
       const emissions24hAmount = normalizeAmount(emissionsRaw, rewardMeta.decimals);
       const pendingNowAmount = normalizeAmount(pendingNow, rewardMeta.decimals);
       const emissions24hUsd = emissions24hAmount * rewardPrice;
@@ -2167,8 +2168,7 @@ async function fetchAerodromeEmissions24h(row, blockWindow, apiKey, provider, cl
     };
   }
 
-  const pendingDelta = safePositive(pendingNow - pendingStart);
-  const emissionsRaw = pendingDelta + realizedAttributed;
+  const emissionsRaw = safePositive(realizedAttributed + pendingNow - pendingStart);
   const tokenMeta = await getTokenMeta(rewardToken, provider);
   const prices = await getPrices([tokenMeta.address], apiKey);
   const rewardPrice = prices[tokenMeta.address];
@@ -2297,8 +2297,7 @@ async function fetchPancakeEmissions24h(row, blockWindow, apiKey, provider, clai
     }
   }
 
-  const pendingDelta = safePositive(pendingNow - pendingStart);
-  const emissionsRaw = pendingDelta + realizedAttributed;
+  const emissionsRaw = safePositive(realizedAttributed + pendingNow - pendingStart);
   const tokenMeta = await getTokenMeta(rewardToken, provider);
   const prices = await getPrices([tokenMeta.address], apiKey);
   const rewardPrice = prices[tokenMeta.address];
@@ -2397,14 +2396,16 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
     await delay(RETRY_BASE_MS);
     snapshot24h = await fetchClaimableSnapshotAtBlock(row, blockWindow.fromBlockTag, apiKey, provider);
   }
-  const collect24h = await fetchCollectAmounts24h(row, apiKey, blockWindow);
 
   const pendingNow0 = snapshotNow.claimable?.amount0 || 0n;
   const pendingNow1 = snapshotNow.claimable?.amount1 || 0n;
-  const pendingStart0 = snapshot24h?.claimable?.amount0 || 0n;
-  const pendingStart1 = snapshot24h?.claimable?.amount1 || 0n;
-  const rawFees0 = collect24h.amount0 + pendingNow0 - pendingStart0;
-  const rawFees1 = collect24h.amount1 + pendingNow1 - pendingStart1;
+  const liquidityForFees = BigInt(snapshotNow.position?.liquidity || 0n);
+  const feeGrowthStart = snapshot24h?.feeGrowthInside || {
+    feeGrowthInside0: BigInt(snapshotNow.position?.feeGrowthInside0LastX128 || 0n),
+    feeGrowthInside1: BigInt(snapshotNow.position?.feeGrowthInside1LastX128 || 0n)
+  };
+  const rawFees0 = (liquidityForFees * subIn256(snapshotNow.feeGrowthInside.feeGrowthInside0, feeGrowthStart.feeGrowthInside0)) / Q128;
+  const rawFees1 = (liquidityForFees * subIn256(snapshotNow.feeGrowthInside.feeGrowthInside1, feeGrowthStart.feeGrowthInside1)) / Q128;
   const fees24hRaw0 = adapter.feesMode === "none" ? 0n : safePositive(rawFees0);
   const fees24hRaw1 = adapter.feesMode === "none" ? 0n : safePositive(rawFees1);
 
@@ -2422,6 +2423,30 @@ async function enrichCurrentRowWith24hMetrics(row, blockWindow, apiKey, provider
   const price0 = valuation.prices[token0Meta.address] ?? 0;
   const price1 = valuation.prices[token1Meta.address] ?? 0;
   const fees24hUsd = (Number.isFinite(price0) ? fees24hToken0 * price0 : 0) + (Number.isFinite(price1) ? fees24hToken1 * price1 : 0);
+  pushTrace("fee_24h_debug", {
+    chain: ACTIVE_CHAIN_KEY,
+    protocol: row.protocol,
+    source: row.source || "",
+    tokenContract: row.tokenContract,
+    tokenIdHex: row.tokenIdHex,
+    tokenIdDecimal: row.tokenIdDecimal,
+    fromBlock: blockWindow.fromBlock,
+    toBlock: blockWindow.toBlock,
+    fromBlockTag: blockWindow.fromBlockTag,
+    toBlockTag: blockWindow.toBlockTag,
+    liquidity: liquidityForFees,
+    feeGrowthStart0: feeGrowthStart.feeGrowthInside0,
+    feeGrowthStart1: feeGrowthStart.feeGrowthInside1,
+    feeGrowthNow0: snapshotNow.feeGrowthInside.feeGrowthInside0,
+    feeGrowthNow1: snapshotNow.feeGrowthInside.feeGrowthInside1,
+    rawFees0,
+    rawFees1,
+    fees24hToken0,
+    fees24hToken1,
+    price0,
+    price1,
+    fees24hUsd
+  });
   const vfatFeesClaimableNowUsd = adapter.feesMode === "none"
     ? 0
     : (Number.isFinite(price0) ? claimableNowToken0 * price0 : 0) + (Number.isFinite(price1) ? claimableNowToken1 * price1 : 0);
@@ -3060,8 +3085,7 @@ function getAmountsForLiquidity(sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, liqu
   return { amount0, amount1 };
 }
 
-// This mirrors Uniswap fee-growth math and returns the currently claimable token amounts.
-function getClaimableAmounts(position, poolState) {
+function getFeeGrowthInside(position, poolState) {
   const feeGrowthGlobal0 = BigInt(poolState.feeGrowthGlobal0);
   const feeGrowthGlobal1 = BigInt(poolState.feeGrowthGlobal1);
   const feeGrowthOutsideLower0 = BigInt(poolState.lowerTick.feeGrowthOutside0X128);
@@ -3071,7 +3095,6 @@ function getClaimableAmounts(position, poolState) {
   const tickCurrent = Number(poolState.slot0.tick);
   const tickLower = Number(position.tickLower);
   const tickUpper = Number(position.tickUpper);
-  const liquidity = BigInt(position.liquidity);
 
   const feeGrowthBelow0 = tickCurrent >= tickLower ? feeGrowthOutsideLower0 : subIn256(feeGrowthGlobal0, feeGrowthOutsideLower0);
   const feeGrowthBelow1 = tickCurrent >= tickLower ? feeGrowthOutsideLower1 : subIn256(feeGrowthGlobal1, feeGrowthOutsideLower1);
@@ -3080,6 +3103,14 @@ function getClaimableAmounts(position, poolState) {
 
   const feeGrowthInside0 = subIn256(subIn256(feeGrowthGlobal0, feeGrowthBelow0), feeGrowthAbove0);
   const feeGrowthInside1 = subIn256(subIn256(feeGrowthGlobal1, feeGrowthBelow1), feeGrowthAbove1);
+
+  return { feeGrowthInside0, feeGrowthInside1 };
+}
+
+// This mirrors Uniswap fee-growth math and returns the currently claimable token amounts.
+function getClaimableAmounts(position, poolState) {
+  const { feeGrowthInside0, feeGrowthInside1 } = getFeeGrowthInside(position, poolState);
+  const liquidity = BigInt(position.liquidity);
 
   const pending0 = BigInt(position.tokensOwed0) + (liquidity * subIn256(feeGrowthInside0, BigInt(position.feeGrowthInside0LastX128))) / Q128;
   const pending1 = BigInt(position.tokensOwed1) + (liquidity * subIn256(feeGrowthInside1, BigInt(position.feeGrowthInside1LastX128))) / Q128;
