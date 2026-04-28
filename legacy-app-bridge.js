@@ -3829,9 +3829,8 @@ function buildIncreasePositionButton(row) {
     ? "Token ratio unavailable for this position"
     : "Calculate token amounts to add";
   return `
-    <button class="increase-position-button" type="button" data-increase-position-id="${escapeHtml(rowId)}"${disabled} title="${escapeHtml(title)}">
-      <span aria-hidden="true">+</span>
-      <span>Increase</span>
+    <button class="increase-position-button" type="button" data-increase-position-id="${escapeHtml(rowId)}"${disabled} title="${escapeHtml(title)}" aria-label="Increase position calculator">
+      <span aria-hidden="true">&#x1F9EE;</span>
     </button>
   `;
 }

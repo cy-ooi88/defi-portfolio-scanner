@@ -1114,9 +1114,10 @@ body::before {
 }
 
 .range-current-stack {
-  display: grid;
-  justify-items: center;
-  gap: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .range-mini {
@@ -1131,19 +1132,21 @@ body::before {
 }
 
 .increase-position-button {
-  min-height: 24px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
   border: 1px solid rgba(105, 213, 255, 0.28);
   border-radius: 7px;
   background: rgba(105, 213, 255, 0.09);
   color: var(--cyan);
   font-family: "Space Mono", monospace;
-  font-size: 0.69rem;
+  font-size: 0.85rem;
   font-weight: 700;
   line-height: 1;
-  padding: 0 8px;
+  padding: 0;
   cursor: pointer;
   transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
 }
